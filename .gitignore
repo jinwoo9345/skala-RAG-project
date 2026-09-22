@@ -38,3 +38,4 @@ Thumbs.db
 
 # Package manager lock files
 uv.lock
+pyproject.toml
