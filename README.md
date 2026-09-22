@@ -1,6 +1,6 @@
 # Subject
 
-본 프로젝트는 데이터센터·클라우드 환경에서 발생하는 KV Cache 메모리 문제를 해결하기 위한 기술을 비교 평가하는 Agentic RAG 프로젝트이다. SW·시스템 관리 관점의 ITME와 HW·메모리 근접 연산 관점의 CXL-PIM을 선정하고, 기술 성숙도(TRL), 시장성, 이해관계자, 데이터센터 적용성 관점에서 각각의 특징과 한계를 분석한다.
+본 프로젝트는 데이터센터·클라우드 환경에서 발생하는 KV Cache 메모리 문제를 해결하기 위한 기술을 비교 평가하는 Agentic RAG 프로젝트이다. 두가지 HW 방식의 기술을 선정하고, 기술 성숙도(TRL), 시장성, 이해관계자, 데이터센터 적용성 관점에서 각각의 특징과 한계를 분석한다.
 
 ## Overview
 
@@ -10,10 +10,8 @@
 
 ## Selected Technologies
 
-- **SW·System : ITME** — CXL과 NVMe를 활용한 계층형 메모리 구조에 prefetch 제어를 적용하여 KV Cache 저장 공간을 확장하고, GPU와 외부 메모리 사이의 데이터 이동을 관리하는 기술이다.
+- **HW : ITME** — CXL과 NVMe를 활용한 계층형 메모리 구조에 prefetch 제어를 적용하여 KV Cache 저장 공간을 확장하고, GPU와 외부 메모리 사이의 데이터 이동을 관리하는 기술이다.
 - **HW : CXL-PIM** — CXL memory 내부의 PNM 가속기에서 token page selection과 attention 연산을 수행하여 GPU 메모리 사용량과 데이터 이동 비용을 줄이는 기술이다.
-
-> ITME는 순수한 소프트웨어 기술이 아니라 CXL-hybrid memory와 소프트웨어 제어를 함께 사용하는 HW/SW 공동 설계이다. 본 프로젝트에서는 두 기술을 완전히 SW와 HW로 구분하기보다는, KV Cache 최적화 과정에서 주로 제어하는 지점을 기준으로 비교했다.
 
 ## Features
 
