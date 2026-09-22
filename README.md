@@ -51,6 +51,34 @@
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    A[기술·도메인 입력] --> B[기술 조사 Agent / RAG]
+    B --> C{1차 근거 충분?}
+    C -->|부족| D{retry_count < max_retries?}
+    D -->|Yes| E[Query Rewrite]
+    E --> B
+    D -->|No| F[missing_evidence 기록]
+    C -->|충분| G[4개 관점 Fan-out]
+    F --> G
+    G --> H[TRL Agent]
+    G --> I[시장 Agent]
+    G --> J[이해관계자 Agent]
+    G --> K[도메인 Agent]
+    H --> L[Fan-in]
+    I --> L
+    J --> L
+    K --> L
+    L --> M{2차 근거 충분?}
+    M -->|부족| N[missing_evidence 기록]
+    M -->|충분| O[Counter-Evidence]
+    N --> O
+    O --> P[Conflict Analysis]
+    P --> Q[Synthesis Agent]
+    Q --> R[Report Agent]
+    R --> S[최종 PDF 보고서]
+```
+
 ## Directory Structure
 
 ```text
