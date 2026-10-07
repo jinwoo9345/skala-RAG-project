@@ -119,11 +119,15 @@ uv run python app.py --run --resume {trace_id}  # 중단된 실행 이어서 실
 
 생성된 보고서와 실행 State는 `outputs/{실행시각}-{trace_id}/`에 저장된다.
 
+## Limitation
+
+- 웹 자료의 `direct`·`ecosystem`·`comparison` 범위는 기술명과 본문을 기준으로 자동 분류한다. 이 과정에서 상위 생태계 자료가 특정 기술의 직접 근거처럼 연결될 수 있다. 예를 들어 XCENA를 다룬 2차 자료가 ITME 이해관계자 평가에 연결된 사례가 있으므로, `ecosystem` 근거는 개별 기술의 Fact로 단정하지 않고 최종 보고서에서 주장 주어와 인용의 의미적 일치를 사람이 검토해야 한다.
+
 ## Contributors
 
-- **백소현** : RAG Pipeline, Technical Research Agent
-- **윤정수** : TRL Evaluation Agent, Market Evaluation Agent, Web Evidence 구조화
-- **전상진** : Stakeholder Evaluation Agent, Domain Evaluation Agent
-- **전현찬** : LangGraph Workflow, State Schema, Supervisor Routing
-- **정진우** : Evidence Validation, Query Rewrite, Counter-Evidence, Conflict Analysis
-- **정현주** : Synthesis Agent, Report Agent, Reference 연결, Integration Test
+- **백소현** : RAG 파이프라인과 기술 조사 Agent를 구현했다. Supervisor 기반 상태별 동적 경로 결정을 구현했다.
+- **윤정수** : TRL·시장 평가 Agent를 구현하고 Web Search 근거를 구조화했다. 규칙 검사·LLM 판정을 결합한 보고서 품질 평가를 구현했다.
+- **전상진** : 이해관계자·도메인 평가 Agent를 구현하고 평가 기준을 정리했다. 체크포인트 재개와 Agent 실패 복구를 구현했다.
+- **전현찬** : LangGraph, State, Fan-out/Fan-in을 포함한 전체 Workflow를 구현했다. 부족 근거의 선택적 재조사와 재작업 횟수 제어를 구현했다.
+- **정진우** : Evidence 검사, Query Rewrite, Counter-Evidence, Conflict Node를 구현했다. 웹 근거의 출처 등급·관련 범위 분류와 다국어 정보 정규화를 구현했다.
+- **정현주** : Synthesis·Report Agent를 구현하고 Reference 연결과 통합 테스트를 담당했다. 인용·참고문헌 검증과 품질 미달 보고서 분리 저장을 구현했다.

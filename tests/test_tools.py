@@ -48,6 +48,22 @@ class ToolTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             web_search(tool, "query")
 
+    def test_english_url_replaces_mismatched_localized_title(self):
+        tool = Mock()
+        tool.search.return_value = [
+            {
+                "url": "https://zamin.uz/en/technology/204065-ai-memory-bottleneck-startup-raises-135-million.html",
+                "title": "Сунъий интеллект хотира муаммосини ҳал этувчи стартап 135 млн доллар жалб қилди",
+                "raw_content": (
+                    "# AI memory bottleneck startup raises $135 million\n\n"
+                    "Every time you send a prompt, data undergoes a relay race."
+                ),
+                "published_date": "Fri, 29 May 2026 00:00:00 GMT",
+            }
+        ]
+        results = web_search(tool, "query")
+        self.assertEqual(results[0]["source"], "AI memory bottleneck startup raises $135 million")
+
     def test_llm_uses_schema_and_store_false(self):
         client = Mock()
         client.responses.parse.return_value.output_parsed = Extraction(facts=[])

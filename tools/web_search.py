@@ -2,11 +2,10 @@
 
 import hashlib
 import re
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from langchain_teddynote.tools.tavily import TavilySearch
-
-from email.utils import parsedate_to_datetime
 
 from config import EXCLUDED_WEB_DOMAINS, TECH_PROFILES, source_tier
 from workflow_logging import get_logger, log_operation
@@ -17,6 +16,39 @@ def canonical_url(url: str) -> str:
     if parts.scheme not in ("https", "http") or not parts.netloc or parts.username:
         return ""
     return urlunsplit((parts.scheme, parts.netloc.lower(), parts.path, parts.query, ""))
+
+
+def _latin_ratio(text: str) -> float:
+    letters = [character for character in text if character.isalpha()]
+    if not letters:
+        return 0.0
+    return sum("a" <= character.lower() <= "z" for character in letters) / len(letters)
+
+
+def source_title(row: dict, url: str, content: str) -> str:
+    """영문 URL에 다른 문자권 제목이 붙으면 본문 제목 또는 URL slug로 교정한다.
+
+    Tavily가 다국어 사이트의 기본 언어 제목을 반환하는 경우가 있다. 추가 HTTP 호출 없이
+    이미 받은 raw_content의 첫 부분에서 URL slug와 가장 가까운 영문 제목을 찾는다.
+    """
+    title = re.sub(r"\s+", " ", (row.get("title") or "").strip())
+    path_parts = [part for part in urlsplit(url).path.split("/") if part]
+    if not path_parts or path_parts[0].lower() != "en" or _latin_ratio(title) >= 0.6:
+        return title or url
+
+    slug = path_parts[-1].removesuffix(".html")
+    slug_words = set(re.findall(r"[a-z0-9]+", slug.lower()))
+    candidates = []
+    for raw_line in content.splitlines()[:40]:
+        line = re.sub(r"^[#>*\-\s]+|\s+", " ", raw_line).strip()
+        if not 8 <= len(line) <= 180 or _latin_ratio(line) < 0.6:
+            continue
+        words = set(re.findall(r"[a-z0-9]+", line.lower()))
+        score = len(slug_words & words) / max(len(slug_words), 1)
+        candidates.append((score, -len(line), line))
+    if candidates and max(candidates)[0] >= 0.6:
+        return max(candidates)[2]
+    return slug.replace("-", " ").strip() or title or url
 
 
 def blog_url(url: str) -> bool:
@@ -111,7 +143,7 @@ def normalize_web_results(results: list[dict]) -> list[dict]:
             {
                 "chunk_id": "web-" + hashlib.sha256(url.encode()).hexdigest()[:16],
                 "document_id": url,
-                "source": row.get("title") or url,
+                "source": source_title(row, url, content),
                 "source_url": url,
                 "page": None,
                 "role": "web",
