@@ -4,6 +4,7 @@ from config import (
     EVALUATION_CRITERIA,
     EVALUATION_GUIDANCE,
     FACT_MAX_TIER,
+    MARKET_LEVEL_CRITERIA,
     QUERY_TERMS,
     TECH_PROFILES,
     TECHNICAL_FACT_MAX_TIER,
@@ -45,14 +46,8 @@ def _finding_policy(item, selected, perspective):
     if item["kind"] == "Fact" and not trusted_fact:
         return False, "낮은 등급의 웹 자료만으로 작성된 Fact를 제외함."
     if item["criterion"] in DIRECT_EVIDENCE_CRITERIA and "direct" not in scopes:
-        # 상위 시장·생태계 자료도 주변 여건을 설명하는 Inference에는 사용할 수 있다.
-        # 개별 기술의 제품화·도입 Fact로 승격하지 않고 한계를 강제로 남긴다.
-        if item["kind"] == "Fact":
-            return False, "개별 기술의 직접 근거가 없는 제품화·도입 Fact를 제외함."
-        note = (
-            "상위 시장·생태계 자료를 이용한 제한적 해석이며, 해당 기술 자체의 제품화·도입을 입증하지 않는다."
-        )
-        item["limitation"] = (note + " " + item["limitation"]).strip()
+        # 제품화·도입은 개별 기술에 대한 주장이므로, 상위 시장 자료로는 어떤 종류의 주장도 만들지 않는다.
+        return False, "개별 기술의 직접 근거가 없는 제품화·도입 주장을 제외함."
     return True, ""
 
 
@@ -77,6 +72,7 @@ def evaluate(state, services, perspective, sources, evidence=None):
         "TRL 관점에서만 trl_level을 1~9 또는 null로 기입. 검증 근거가 없으면 null. "
         "TRL 1 기초원리, 2 개념, 3 개념증명, 4 실험실 검증, 5 관련환경 검증, "
         "6 관련환경 시제품, 7 운영환경 시제품, 8 시스템 완성/검증, 9 실제 운영 입증. "
+        "연구용 테스트베드·시뮬레이션은 실환경 검증으로 보지 않는다. "
         "TRL 값은 공개 정보 기반 추정이라고 limitation에 명시. "
         "시장 평가는 개별 기술의 채택 근거와 상위 CXL/PIM 시장 자료를 같은 근거처럼 섞지 말 것. "
         "이해관계자 평가는 실제 발언(Opinion)과 Agent 해석(Inference)을 구분하고 발언자·소속·발행일을 확인할 것. "
@@ -113,6 +109,9 @@ def evaluate(state, services, perspective, sources, evidence=None):
         if perspective != "trl":
             item["trl_level"] = None
         elif item["trl_level"] is not None:
+            if all(evidence.get("role") != "web" for evidence in selected):
+                # 논문 근거만으로는 실험실 검증(TRL 4)을 넘는다고 판단하지 않는다.
+                item["trl_level"] = min(item["trl_level"], 4)
             item["limitation"] = "공개 정보 기반 추정 TRL이며 공식 인증값이 아님. " + item["limitation"]
             item["kind"] = "Inference"
         findings.append(item)
@@ -149,10 +148,16 @@ def web_sources(state, services, perspective):
     for technology in technology_names(state):
         profile = TECH_PROFILES.get(technology, {})
         primary = (list(profile.get("distinctive", ())) or [technology])[0]
+        alias = profile.get("search_alias", technology)
         rows, seen = [], set()
         for criterion in EVALUATION_CRITERIA[perspective]:
             terms = QUERY_TERMS.get(criterion, criterion)
-            for query in (f'"{primary}" {terms}', f'"{technology}" KV cache {terms}'):
+            if criterion in MARKET_LEVEL_CRITERIA and profile.get("market_term"):
+                # 연구 단계 기술은 개별 시장 자료가 없으므로 상위 시장 단위로 검색한다.
+                queries = (f"{profile['market_term']} {terms}", f"{alias} {terms}")
+            else:
+                queries = (f"{primary} {terms}", f"{alias} KV cache {terms}")
+            for query in queries:
                 relevant = 0
                 for candidate in web_search(
                     services.web, query, max_results=services.settings.search_results

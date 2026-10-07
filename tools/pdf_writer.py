@@ -136,9 +136,7 @@ def _story(markdown, styles):
             story.append(Paragraph(_paragraph_text(line[2:]), styles["note"]))
         elif line.startswith("- "):
             story.append(Paragraph("• " + _paragraph_text(line[2:]), styles["bullet"]))
-        elif (re.match(r"^\d+\.\s", line) and previous_chapter == "REFERENCE") or line.startswith(
-            "근거 ID:"
-        ):
+        elif re.match(r"^\d+\.\s", line) and previous_chapter == "REFERENCE":
             story.append(Paragraph(_paragraph_text(line), styles["bullet"]))
         else:
             story.append(Paragraph(_paragraph_text(line), styles["body"]))

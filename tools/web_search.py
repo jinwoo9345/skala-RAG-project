@@ -23,6 +23,18 @@ def excluded_web_domain(url: str) -> bool:
     return any(host == domain or host.endswith("." + domain) for domain in EXCLUDED_WEB_DOMAINS)
 
 
+# 고유 명칭은 제목과 본문 앞부분에서만 찾는다. 페이지 하단의 관련 글 목록에
+# 이름만 나온 다른 기술 자료를 대상 기술의 직접 근거로 오인하지 않기 위해서다.
+DIRECT_SCOPE_CHARS = 2000
+
+CORE_PAPER_IDS = tuple(pid for profile in TECH_PROFILES.values() for pid in profile["paper_ids"])
+
+
+def core_paper_url(url: str) -> bool:
+    """평가 대상 핵심 논문 자체의 URL인지 확인한다. 논문 내용은 RAG로 이미 사용한다."""
+    return any(pid in url for pid in CORE_PAPER_IDS)
+
+
 def relevance(text: str, technology: str) -> str | None:
     """근거 범위를 direct / ecosystem / comparison 으로 나눈다.
 
@@ -35,9 +47,12 @@ def relevance(text: str, technology: str) -> str | None:
         return "comparison"
     if re.search(r"\bCENT\b|PIM Is All You Need", text, re.IGNORECASE):
         return "comparison"
-    if any(name.lower() in text.lower() for name in profile["distinctive"]):
+    head = text[:DIRECT_SCOPE_CHARS].lower()
+    if any(name.lower() in head for name in profile["distinctive"]):
         return "direct"
-    if any(name.lower() in text.lower() for name in profile["ambiguous"]) or re.search(
+    if any(
+        re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE) for name in profile["ambiguous"]
+    ) or re.search(
         r"\b(CXL|PIM|PNM|KV[- ]?cache)\b", text, re.IGNORECASE
     ):
         return "ecosystem"
@@ -55,7 +70,15 @@ def normalize_web_results(results: list[dict]) -> list[dict]:
     for row in results:
         url = canonical_url(row.get("url", ""))
         content = row.get("raw_content") or row.get("content") or ""
-        if not url or excluded_web_domain(url) or not content.strip() or url in seen:
+        # LLM은 인용 시 마크다운 기호를 지우므로, 원문에서도 미리 지워 인용문 대조를 맞춘다.
+        content = re.sub(r"\*\*|__|^#+\s*", "", content, flags=re.MULTILINE)
+        if (
+            not url
+            or excluded_web_domain(url)
+            or core_paper_url(url)
+            or not content.strip()
+            or url in seen
+        ):
             continue
         seen.add(url)
         sources.append(

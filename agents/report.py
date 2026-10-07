@@ -2,6 +2,7 @@
 
 import json
 import re
+from datetime import date
 
 from config import PERSPECTIVES
 from evidence import all_evidence, collect_references, valid_ids
@@ -48,15 +49,16 @@ CHAPTERS = {
 }
 
 
-def _reference_text(index, ref):
-    author = ref["author"] or "저자·기관 정보 미확인"
-    date = str(ref["year"] or ref["published_date"] or "발행일 미확인")
+def _reference_text(index, ref, accessed):
+    """확인된 서지 항목만 쓴다. 웹 자료는 저자·발행일 대신 접근일로 출처 시점을 남긴다."""
+    author = ref["author"]
+    date = str(ref["year"] or ref["published_date"] or "")
+    byline = f"{author} ({date}). " if author and date else f"{author}. " if author else f"({date}). " if date else ""
     if ref.get("source_type") == "web":
-        site = ref.get("site_name") or "사이트명 미확인"
-        return f"{index}. {author} ({date}). {ref['source']}. {site}, {ref['source_url']}"
-    publication = ", ".join(x for x in (ref.get("venue"), ref.get("identifier")) if x)
-    publication = publication or "학술지·학회명 미확인"
-    return f"{index}. {author} ({date}). {ref['source']}. {publication}, {ref['source_url']}"
+        place = ", ".join(x for x in (ref.get("site_name"), ref["source_url"]) if x)
+        return f"{index}. {byline}{ref['source']}. {place} (접근일: {accessed})"
+    place = ", ".join(x for x in (ref.get("venue"), ref.get("identifier"), ref["source_url"]) if x)
+    return f"{index}. {byline}{ref['source']}. {place}"
 
 
 def synthesis_fallback(state):
@@ -205,6 +207,15 @@ def trl_summary(state, technologies):
     return lines
 
 
+EVIDENCE_ID = r"(?:[\w-]+-p\d+-c\d+-[0-9a-f]{8}-[0-9a-f]{10}|web-[0-9a-f]{16}-[0-9a-f]{10}|counter-[0-9a-f]{16})"
+
+
+def _strip_evidence_ids(text):
+    """LLM이 본문에 그대로 옮긴 내부 근거 ID를 지운다. 인용은 ⟦CITE⟧ 표기로만 한다."""
+    text = re.sub(rf"\s*\(\s*{EVIDENCE_ID}(?:\s*,\s*{EVIDENCE_ID})*\s*\)", "", text)
+    return re.sub(EVIDENCE_ID, "", text)
+
+
 def _render_report(state, draft, *, mode="live"):
     evidence = all_evidence(state)
     technologies = technology_names(state)
@@ -215,7 +226,7 @@ def _render_report(state, draft, *, mode="live"):
             return ""
         ids = list(dict.fromkeys(paragraph["evidence_ids"]))
         used.update(ids)
-        return paragraph["text"].strip() + " ⟦CITE:" + "|".join(ids) + "⟧"
+        return _strip_evidence_ids(paragraph["text"]).strip() + " ⟦CITE:" + "|".join(ids) + "⟧"
 
     supplemental = {section_id: [] for section_id in SECTIONS}
     section_limitations = {section_id: [] for section_id in SECTIONS}
@@ -453,13 +464,19 @@ def _render_report(state, draft, *, mode="live"):
     refs = collect_references({eid: evidence[eid] for eid in sorted(used)})
     by_eid = {eid: index for index, ref in enumerate(refs, 1) for eid in ref["evidence_ids"]}
     lines.extend(["", "## REFERENCE", ""])
+    accessed = date.today().isoformat()
     for index, ref in enumerate(refs, 1):
         tier = min(
-            (evidence[eid].get("source_tier", 5) for eid in ref["evidence_ids"] if eid in evidence),
+            (
+                evidence[eid].get("source_tier", 5 if evidence[eid].get("role") == "web" else 1)
+                for eid in ref["evidence_ids"]
+                if eid in evidence
+            ),
             default=5,
         )
-        lines.append(_reference_text(index, ref) + f" [출처 등급 {tier}: {SOURCE_TIER_LABELS[tier]}]")
-        lines.append("   - 근거 ID: " + ", ".join(ref["evidence_ids"]))
+        lines.append(
+            _reference_text(index, ref, accessed) + f" [출처 등급 {tier}: {SOURCE_TIER_LABELS[tier]}]"
+        )
 
     def replace_citation(match):
         markers = []

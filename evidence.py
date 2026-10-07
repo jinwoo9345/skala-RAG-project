@@ -15,7 +15,20 @@ def normalized(text):
 
 
 def quote_exists(quote, content):
-    return len(normalized(quote)) >= 12 and normalized(quote) in normalized(content)
+    if len(normalized(quote)) < 12:
+        return False
+    content = normalized(content)
+    # "A ... B"처럼 생략부호로 이은 인용은 각 구간이 원문에 순서대로 있어야 한다.
+    position = 0
+    for segment in re.split(r"\.\.\.|…", quote):
+        segment = normalized(segment)
+        if not segment:
+            continue
+        found = content.find(segment, position)
+        if found < 0:
+            return False
+        position = found + len(segment)
+    return True
 
 
 NUMBER = re.compile(r"(?<![A-Za-z0-9])\d+(?:[.,]\d+)*")
@@ -31,12 +44,27 @@ def quantitative_claim(text):
     return bool(UNIT.search(normalized(text)))
 
 
+NUMBER_WORDS = {
+    word: str(value)
+    for value, word in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve".split()
+    )
+}
+
+
 def numeric_supported(claim, evidence):
     """주장에 쓰인 숫자와 단위가 인용 원문에 실제로 있는지 확인한다."""
     original = " ".join(
         str(e.get(k, ""))
         for e in evidence
         for k in ("quote", "experimental_condition", "year", "published_date")
+    )
+    # 원문 "eight GPUs"를 claim에서 "8개"로 옮긴 경우도 같은 숫자로 본다.
+    original = re.sub(
+        r"\b(" + "|".join(NUMBER_WORDS) + r")\b",
+        lambda m: NUMBER_WORDS[m.group(1).lower()],
+        original,
+        flags=re.IGNORECASE,
     )
     if not set(NUMBER.findall(normalized(claim))).issubset(NUMBER.findall(normalized(original))):
         return False
@@ -58,7 +86,10 @@ def extract_evidence(services, chunks, *, technology, perspective, items):
         "그 구절의 청크 ID를 넣는다. 동일 문서의 다른 페이지도 가능. 비수치면 두 필드는 빈 문자열. "
         "자료에서 조건을 못 찾으면 수치 주장을 추출하지 말 것. 웹 Opinion은 Fact로 바꾸지 말 것. "
         "실제 발언이면 speaker와 affiliation을 자료에 적힌 그대로 기록하고, 없으면 빈 문자열로 둔다. "
-        "보조 기술 문서를 대상 기술의 직접 성능 근거로 사용하지 말 것.",
+        "보조 기술 문서를 대상 기술의 직접 성능 근거로 사용하지 말 것. "
+        "자료가 대상 기술을 직접 언급하지 않으면 claim의 주어를 대상 기술로 쓰지 말고 자료가 다루는 대상"
+        "(예: CXL 메모리 시장, 특정 기업 제품)을 주어로 쓴다. "
+        "수치는 원문 표기 그대로(예: USD 1.27 billion, 31.5% CAGR) 옮기고 단위를 환산하지 말 것.",
         {"technology": technology, "items": list(items), "chunks": chunks},
         Extraction,
     )
@@ -66,7 +97,23 @@ def extract_evidence(services, chunks, *, technology, perspective, items):
     evidence, rejected = {}, Counter()
     for fact in result.facts:
         source = by_id.get(fact.chunk_id)
+        if source is None or not quote_exists(fact.quote, source["content"]):
+            # LLM이 인용문에 다른 자료의 ID를 붙이는 경우, 인용문이 실제로 있는 유일한 자료로 바로잡는다.
+            matches = [x for x in chunks if quote_exists(fact.quote, x["content"])]
+            if len(matches) == 1:
+                source = matches[0]
         condition_source = by_id.get(fact.condition_chunk_id)
+        kind = fact.kind
+        if (
+            getattr(services, "mode", "live") != "demo"
+            and kind == "Fact"
+            and source is not None
+            and source.get("role") == "web"
+            and source.get("source_tier", 5)
+            > (TECHNICAL_FACT_MAX_TIER if perspective in ("technical", "domain", "trl") else FACT_MAX_TIER)
+        ):
+            # 낮은 등급 출처는 제거하지 않고 Opinion으로만 사용한다(config.FACT_MAX_TIER 주석).
+            kind = "Opinion"
         reason = ""
         if source is None:
             reason = "unknown_chunk"
@@ -83,14 +130,6 @@ def extract_evidence(services, chunks, *, technology, perspective, items):
             [{"quote": fact.quote, "experimental_condition": fact.experimental_condition}],
         ):
             reason = "numeric_mismatch"
-        elif (
-            getattr(services, "mode", "live") != "demo"
-            and fact.kind == "Fact"
-            and source.get("role") == "web"
-            and source.get("source_tier", 5)
-            > (TECHNICAL_FACT_MAX_TIER if perspective in ("technical", "domain", "trl") else FACT_MAX_TIER)
-        ):
-            reason = "low_source_tier"
         elif fact.speaker and normalized(fact.speaker).lower() not in normalized(source["content"]).lower():
             reason = "speaker_mismatch"
         elif (
@@ -108,7 +147,7 @@ def extract_evidence(services, chunks, *, technology, perspective, items):
             rejected[reason] += 1
             continue
         identifier = (
-            fact.chunk_id
+            source["chunk_id"]
             + "-"
             + hashlib.sha256(
                 (technology + perspective + fact.item + normalized(fact.quote)).encode()
@@ -121,7 +160,7 @@ def extract_evidence(services, chunks, *, technology, perspective, items):
             "perspective": perspective,
             "claim": fact.claim,
             "quote": fact.quote,
-            "kind": fact.kind,
+            "kind": kind,
             "numeric": fact.numeric,
             "experimental_condition": fact.experimental_condition,
             "condition_source": (

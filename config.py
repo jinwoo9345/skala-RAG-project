@@ -72,7 +72,11 @@ SOURCE_PRIORITY = (
     # 3. 특허
     ("patents.google.com", "uspto.gov", "patentscope.wipo.int", "wipo.int"),
     # 4. 시장·제품 정보 (기업 공시·애널리스트)
-    ("sec.gov", "gartner.com", "idc.com"),
+    (
+        "sec.gov", "gartner.com", "idc.com", "trendforce.com", "yolegroup.com",
+        "mordorintelligence.com", "fortunebusinessinsights.com", "marketsandmarkets.com",
+        "grandviewresearch.com",
+    ),
 )
 TRUSTED_DOMAINS = tuple(domain for tier in SOURCE_PRIORITY for domain in tier)
 
@@ -127,13 +131,21 @@ TECH_PROFILES = {
         "paper_ids": ("2606.12556",),
         "distinctive": ("Inference Tiered Memory Expansion", "Disaggregated CXL-Hybrid"),
         "ambiguous": ("ITME",),
+        "search_alias": "ITME CXL-hybrid memory",
+        "market_term": "CXL memory expansion",
     },
     "CXL-PIM": {
         "paper_ids": ("2511.00321",),
         "distinctive": ("Scalable Processing-Near-Memory", "PNM-KV", "1M-Token LLM Inference"),
         "ambiguous": ("CXL-PIM", "CXL-PNM", "CXL PNM"),
+        "search_alias": "CXL-PNM PNM-KV",
+        "market_term": "CXL processing near memory PIM",
     },
 }
+
+# 개별 기술이 아니라 상위 시장 단위로만 자료가 존재하는 평가 기준.
+# 기술명 대신 TECH_PROFILES의 market_term으로 검색한다.
+MARKET_LEVEL_CRITERIA = ("시장 규모·성장성", "지원 생태계", "경쟁 진영", "투자 업계")
 
 # 출처 등급별 허용 용도. 저품질 출처를 제거하지는 않되 Fact 근거로는 쓰지 않는다.
 #   1~2 논문·공식 문서 : 기술/제품 Fact 가능

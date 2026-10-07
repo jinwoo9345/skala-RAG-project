@@ -2,7 +2,7 @@
 
 import hashlib
 
-from config import FACT_MAX_TIER, PERSPECTIVES, TECHNICAL_FACT_MAX_TIER
+from config import FACT_MAX_TIER, PERSPECTIVES, QUERY_TERMS, TECH_PROFILES, TECHNICAL_FACT_MAX_TIER
 from evidence import all_evidence, numeric_supported, quantitative_claim, quote_exists, valid_ids
 from schemas import Conflicts, CounterResult
 from state import technology_names
@@ -29,9 +29,12 @@ def counter_evidence_node(state, services):
         for finding in findings:
             target = finding["claim"]
             identifier = "counter-" + hashlib.sha256((perspective + target).encode()).hexdigest()[:16]
+            # 한국어 claim 문장은 영어 자료와 맞지 않으므로 기술 별칭과 기준 키워드로 검색한다.
+            alias = TECH_PROFILES.get(finding["technology"], {}).get("search_alias", finding["technology"])
+            terms = QUERY_TERMS.get(finding["criterion"], finding["criterion"])
             sources = web_search(
                 services.web,
-                f"{finding['technology']} {target[:350]} limitations contrary evidence",
+                f"{alias} {terms} limitations contrary evidence",
                 max_results=services.settings.search_results,
             )
             if services.mode != "demo":
