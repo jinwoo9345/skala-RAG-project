@@ -60,7 +60,7 @@ def summarize_state(value) -> str:
             detail = f"{len(item)}개"
         elif isinstance(item, str):
             detail = f"{len(item)}자"
-        elif key in ("max_retries", "retry_count") and isinstance(item, int):
+        elif key in ("max_retries", "retry_count", "step_count") and isinstance(item, int):
             detail = str(item)
         else:
             detail = type(item).__name__
@@ -76,17 +76,6 @@ def log_node(name, function, logger):
         started = perf_counter()
         logger.info("NODE_START | %s", name)
         logger.debug("NODE_INPUT | %s | %s", name, summarize_state(state))
-        if name == "query_rewrite":
-            logger.info(
-                "RETRY | 완료 횟수=%s | 한도=%s | 부족 근거=%d개",
-                state.get("retry_count"),
-                state.get("max_retries"),
-                len(state.get("missing_evidence", [])),
-            )
-        elif name == "fan_out":
-            logger.info("FAN_OUT | TRL·시장·이해관계자·도메인 평가 시작")
-        elif name == "fan_in":
-            logger.info("FAN_IN | 4개 평가 완료; 근거·참고문헌 병합")
         try:
             result = function(state, *args, **kwargs)
         except Exception as exc:
@@ -109,9 +98,6 @@ def log_node(name, function, logger):
             perf_counter() - started,
             summarize_state(result),
         )
-        if name in ("first_check", "second_check"):
-            missing = result.get("missing_evidence", state.get("missing_evidence", []))
-            logger.info("EVIDENCE_RESULT | %s | 부족 근거=%d개", name, len(missing))
         if name == "report":
             logger.info("REPORT_READY | 보고서=%d자", len(result.get("final_report", "")))
         return result

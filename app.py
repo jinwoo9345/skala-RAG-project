@@ -79,7 +79,7 @@ def main(argv=None):
     modes.add_argument("--check", action="store_true", help="설정·의존성·PDF 존재 확인 (외부 호출 없음)")
     parser.add_argument(
         "--scenario",
-        choices=["normal", "retry_success", "retry_exhausted", "second_missing", "counter_found"],
+        choices=["normal", "retry_success", "retry_exhausted", "second_missing", "counter_found", "quality_fail"],
         default="normal",
     )
     parser.add_argument("--rebuild-index", action="store_true")
@@ -104,7 +104,7 @@ def main(argv=None):
             raise FileNotFoundError("지정한 env 파일 없음")
         load_dotenv(args.env_file or PROJECT_ROOT / ".env", override=True)
         settings = Settings.from_env()
-        state = initial_state(max_retries=args.max_retries)
+        state = initial_state(max_retries=args.max_retries, trace_id=run_id)
         if args.show_state:
             print(json.dumps(state, ensure_ascii=False, indent=2))
         if args.check:
@@ -135,15 +135,28 @@ def main(argv=None):
                 services = live_services(settings)
             graph = build_graph(run_id, services)
             result = graph.invoke(
-                state, config={"recursion_limit": 30 + 5 * args.max_retries, "max_concurrency": 4}
+                state,
+                config={
+                    # supervisor ⇄ 에이전트 왕복마다 2 superstep. max_steps 가드가 먼저 종료시킨다.
+                    "recursion_limit": 2 * state["max_steps"] + 10,
+                    # LangSmith 트레이스와 State·로그를 같은 trace_id로 연결한다.
+                    "run_name": "kv-cache-supervisor",
+                    "metadata": {"trace_id": run_id},
+                    "tags": ["supervisor", services.mode],
+                },
             )
+            if not result["final_report"]:
+                raise RuntimeError("보고서 생성 실패: " + str(result["last_error"]))
             directory = save_outputs(result, settings, run_id, args.output_dir, services.mode)
             logger.info("REPORT_SAVED | directory=%s", directory)
             logger.info(
-                "RUN_DONE | elapsed=%.3fs | chars=%d | missing=%d",
+                "RUN_DONE | elapsed=%.3fs | chars=%d | missing=%d | steps=%d | reworks=%s | quality=%s",
                 perf_counter() - started,
                 len(result["final_report"]),
                 len(result["missing_evidence"]),
+                result["step_count"],
+                result["rework_counts"],
+                (result["eval_result"] or {}).get("passed"),
             )
             print(directory / "report.pdf")
         if not any((args.show_state, args.show_graph, args.run, args.demo, args.index, args.check)):

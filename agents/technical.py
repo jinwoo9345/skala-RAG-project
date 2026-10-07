@@ -1,11 +1,18 @@
 """기술 조사 Agent: RAG로 원문 사실을 수집하고 기존 근거와 ID 기준 병합."""
 
 from evidence import extract_evidence
+from nodes.evidence import query_rewrite
 from rag.queries import technical_query_targets
 from state import technology_names
 
 
 def technical_agent(state, services):
+    updates = {}
+    directive = state.get("directive") or {}
+    if directive.get("target") == "technical" and directive.get("missing_items"):
+        # Supervisor 재작업 지시: 부족 항목만 Query Rewrite 후 재검색한다.
+        updates = query_rewrite(state, services)
+        state = {**state, **updates}
     evidence = dict(state["technical_evidence"])
     targets = technical_query_targets(
         technology_names(state), state["missing_evidence"], state["retry_count"]
@@ -41,4 +48,4 @@ def technical_agent(state, services):
         evidence.update(
             extract_evidence(services, selected, technology=technology, perspective="technical", items=items)
         )
-    return {"technical_evidence": evidence}
+    return {**updates, "technical_evidence": evidence}

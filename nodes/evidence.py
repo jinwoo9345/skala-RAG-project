@@ -1,4 +1,4 @@
-"""두 단계 충분성 검사와 한도 분기. 검색 실패와 근거 부족을 혼동하지 않는다."""
+"""근거 충분성 검사와 Query Rewrite. Supervisor가 라우팅 판단에 재사용한다."""
 
 from config import EVALUATION_CRITERIA, PERSPECTIVES, TECHNICAL_EVIDENCE_ITEMS
 from evidence import all_evidence, valid_evidence, valid_ids
@@ -28,14 +28,6 @@ def first_evidence_check(state):
     return {"missing_evidence": missing}
 
 
-def route_first_evidence(state):
-    return "retry" if any(x["stage"] == 1 for x in state["missing_evidence"]) else "evaluate"
-
-
-def route_retry_limit(state):
-    return "rewrite" if state["retry_count"] < state["max_retries"] else "missing"
-
-
 def query_rewrite(state, services):
     """부족 항목의 질의를 재작성하고 실제 재검색 질의를 State에 저장한다."""
     count = state["retry_count"] + 1
@@ -50,13 +42,6 @@ def query_rewrite(state, services):
         raise ValueError("Query Rewrite 결과가 부족 항목과 일치하지 않음")
     get_logger().info("QUERY_REWRITE | strategy=%d | queries=%d", count, len(queries))
     return {"search_queries": queries, "retry_count": count}
-
-
-def record_first_missing(state):
-    get_logger().warning(
-        "RETRY_EXHAUSTED | retries=%d | missing=%d", state["retry_count"], len(state["missing_evidence"])
-    )
-    return {"missing_evidence": [{**x, "status": "retry_exhausted"} for x in state["missing_evidence"]]}
 
 
 def second_evidence_check(state):
@@ -85,15 +70,3 @@ def second_evidence_check(state):
                     )
     get_logger().info("EVIDENCE_CHECK | stage=2 | missing=%d", sum(x["stage"] == 2 for x in missing))
     return {"missing_evidence": missing}
-
-
-def route_second_evidence(state):
-    return "missing" if any(x["stage"] == 2 for x in state["missing_evidence"]) else "verify"
-
-
-def record_second_missing(state):
-    return {
-        "missing_evidence": [
-            {**x, "status": "recorded"} if x["stage"] == 2 else dict(x) for x in state["missing_evidence"]
-        ]
-    }

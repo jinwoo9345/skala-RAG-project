@@ -256,10 +256,3 @@ def collect_references(evidence):
         if item.get("page") is not None and item["page"] not in ref["pages"]:
             ref["pages"].append(item["page"])
     return list(refs.values())
-
-
-def fan_in(state):
-    """병렬 평가 완료 장벽. references는 보고서가 실제 인용 기준으로만 생성한다."""
-    completed = sum(bool(state[f"{perspective}_analysis"]) for perspective in PERSPECTIVES)
-    get_logger().info("EVALUATIONS_JOINED | completed=%d", completed)
-    return {}

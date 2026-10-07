@@ -83,3 +83,13 @@ class ReportSection(StrictModel):
 class ReportDraft(StrictModel):
     summary: list[CitedText]
     sections: list[ReportSection]
+
+
+class QualityItem(StrictModel):
+    name: Literal["groundedness", "neutrality", "bias_control", "coverage"]
+    passed: bool
+    reason: str
+
+
+class QualityJudgement(StrictModel):
+    items: list[QualityItem]

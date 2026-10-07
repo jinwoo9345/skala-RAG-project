@@ -1,121 +1,128 @@
-# Subject
+# KV Cache 최적화 기술 비교 평가
 
-본 프로젝트는 데이터센터·클라우드 환경에서 발생하는 KV Cache 메모리 문제를 해결하기 위한 기술을 비교 평가하는 Agentic RAG 프로젝트이다. 두가지 HW 방식의 기술을 선정하고, 기술 성숙도(TRL), 시장성, 이해관계자, 데이터센터 적용성 관점에서 각각의 특징과 한계를 분석한다.
+## Subject
+
+본 프로젝트는 KV Cache 최적화 기술을 소프트웨어·시스템 진영과 하드웨어 진영에서 각각 선정하고, 기술 성숙도·시장·이해관계자·데이터센터 도메인 관점에서 비교 평가하는 **Supervisor 패턴 기반 Agentic RAG** 프로젝트이다.
 
 ## Overview
 
-- **Objective** : ITME와 CXL-PIM을 여러 관점에서 비교 평가하고, 각 평가 결과의 근거와 출처를 포함한 PDF 보고서를 생성한다.
-- **Method** : Multi-Agent(Distributed) 구조와 Agentic RAG를 사용한다.
-- **Tools** : OpenAI Responses API, Tavily Search, PyMuPDF를 사용한다.
+- **Objective** : ITME와 CXL-PIM을 복수 관점에서 비교하고, 주장별 근거와 출처를 포함한 PDF 보고서를 생성한다.
+- **Pattern** : **Supervisor** — 관점별 근거 확보 상태가 서로 다르므로, 중앙 Supervisor가 State를 읽고 필요한 Agent만 선택하거나 부족한 항목만 재조사하도록 제어한다.
+- **동적 처리** : Agent를 고정된 엣지 순서로 실행하지 않는다. Supervisor가 기술 근거의 충분성, 관점별 평가 기준의 커버리지, Agent 실패 여부, 보고서 품질 평가 결과를 매 단계 확인하여 다음 Agent를 결정한다. 근거가 부족하면 해당 항목만 재검색하고, 품질 평가에 실패하면 허용 범위 안에서 보고서 또는 관점 분석을 다시 수행한다.
 
 ## Selected Technologies
 
-- **HW : ITME** — CXL과 NVMe를 활용한 계층형 메모리 구조에 prefetch 제어를 적용하여 KV Cache 저장 공간을 확장하고, GPU와 외부 메모리 사이의 데이터 이동을 관리하는 기술이다.
-- **HW : CXL-PIM** — CXL memory 내부의 PNM 가속기에서 token page selection과 attention 연산을 수행하여 GPU 메모리 사용량과 데이터 이동 비용을 줄이는 기술이다.
+- **SW/System : ITME** — CXL-hybrid memory와 NVMe를 계층화하고, 예측 가능한 KV Cache 접근에 맞춰 사용자 수준 prefetch 제어와 DMA/RDMA 데이터 이동을 조정하는 시스템 접근이다. 본 프로젝트에서는 HW/SW co-design인 ITME 중 메모리 배치와 prefetch 제어를 중심으로 소프트웨어·시스템 진영으로 분류한다.
+- **HW : CXL-PIM** — CXL memory 내부 PNM 가속기에서 token page selection과 attention 연산을 수행하여 GPU로의 KV Cache 이동과 GPU 메모리 사용량을 줄이는 하드웨어 접근이다.
 
 ## Features
 
-- 핵심 및 보조 논문 PDF 7편을 로딩하고, 검색 결과에서 원본 문서와 페이지를 확인할 수 있도록 출처 메타데이터를 함께 저장한다.
-- 기술 조사·평가 근거는 핵심 논문 2편에서 검색하고, 보조 논문 5편은 도메인 평가에서 비교 맥락으로만 검색한다.
-- Dense 검색과 BM25 검색 결과를 RRF로 결합하여 Hybrid Retrieval을 구성한다.
-- 기술 조사, TRL, 시장, 이해관계자, 도메인 평가를 각각 별도의 Agent로 구성한다.
-- TRL, 시장, 이해관계자, 도메인 평가 Agent는 병렬로 실행하고, 평가가 끝난 뒤 Fan-in 방식으로 결과를 통합한다.
-- 필요한 근거가 부족한 경우 부족한 항목을 기준으로 Query를 다시 작성하고, 제한된 횟수 안에서 재검색한다.
-- 검색된 근거는 인용문, 출처, 기술, 수치, 실험 조건을 함께 확인하며, 검증 기준을 통과하지 못한 근거는 제외 사유를 기록한다.
-- 최종 평가 결과는 한국어 A4 형식의 PDF 보고서로 생성한다.
-- **확증 편향 방지 전략** : 기술과 평가 기준별로 검색을 분리하고, 기존 주장과 반대되는 근거를 추가로 검색한다. 서로 다른 결과가 확인된 경우 Conflict 분석을 수행하며, 근거가 부족하거나 직접 비교하기 어려운 항목은 최종 보고서에 한계로 남긴다.
+- 핵심 논문 2편과 비교용 보조 논문 5편의 PDF를 페이지 단위로 파싱하고, 출처 메타데이터를 보존한다.
+- E5 Dense 검색과 BM25 결과를 RRF로 결합한 Hybrid Retrieval을 사용한다.
+- 기술 근거의 작동 원리, 저장 위치, 데이터 이동, 실험 환경, 성능, Baseline, 한계를 항목별로 추출하고 원문 인용·수치·실험 조건을 검증한다.
+- TRL, 시장성, 이해관계자, 데이터센터 적용성을 독립 Agent가 평가하며, 웹 자료는 출처 등급과 기술 관련 범위에 따라 선별한다.
+- 부족한 기술 근거는 Query Rewrite 후 최대 2회 재검색하고, 부족한 관점 기준은 해당 Agent가 1회 재조사한다.
+- **확증 편향 방지 전략** : 기술·평가 기준별 검색을 분리하고 Fact·Opinion·Inference를 구분한다. 주요 주장에 대한 반대 근거를 별도로 검색하고, 상충하는 결과와 실험 조건 차이는 Conflict로 기록한다. 조건이 다른 수치를 직접 우열 비교하지 않는다.
+- **보고서 품질 평가** : 규칙 검사와 LLM Judge를 함께 사용하여 Groundedness, 중립성, 편향 통제, 관점 커버리지를 평가한다. 두 검사를 모두 통과해야 하며, 미달 시 Supervisor가 최대 1회 재작업을 지시한다.
 
 ## Tech Stack
 
 - **Framework** : LangGraph, LangChain
-- **LLM/Generator** : `gpt-4.1-mini`
-- **LLM/Judge** : `gpt-4.1-mini`
-- **Retrieval** : NumPy Vector Index + BM25 + RRF — Hybrid Hit Rate@10 `1.000`, MRR@10 `0.617`
+- **LLM/Generator** : `gpt-4.1-mini` (기본값, 환경변수로 변경 가능)
+- **LLM/Judge** : `gpt-4.1-mini` (기본값, 환경변수로 변경 가능)
+- **Retrieval** : NumPy cosine index + BM25 + RRF — Hybrid Hit Rate@10 `1.000`, MRR@10 `0.617`
 - **Embedding** : `intfloat/multilingual-e5-base`
 - **Web Search** : Tavily Search
 - **PDF Parsing/Report** : PyMuPDF, ReportLab
 
-> Retrieval 성능은 정답 페이지를 직접 라벨링한 내부 질의 8개를 기준으로 측정했다.
+검색 성능은 정답 페이지를 직접 라벨링한 내부 질의 8개를 기준으로 측정했다.
 
 ## Agents
 
-- **Technical Research Agent** : 핵심 논문을 RAG로 검색하고, 기술의 작동 원리와 성능, 실험 조건, 한계에 대한 근거를 추출한다.
-- **TRL Evaluation Agent** : 논문, PoC, Prototype, 실제 적용 및 상용화 여부를 바탕으로 기술 성숙도를 평가한다.
-- **Market Evaluation Agent** : 제품화 여부, 실제 도입 사례, 관련 생태계와 시장 규모 및 성장성을 조사한다.
-- **Stakeholder Evaluation Agent** : 개발자, 도입 기업, 투자 업계 등 이해관계자별 기대 효과와 우려 사항을 분석한다.
-- **Domain Evaluation Agent** : 데이터센터 환경을 기준으로 용량, 성능, 데이터 이동, 확장성, 비용과 구축 복잡도를 평가한다.
-- **Counter-Evidence/Conflict Node** : 각 평가에서 나온 주요 주장과 반대되는 근거를 추가로 검색하고, 서로 다른 주장이나 결과가 나온 조건을 정리한다.
-- **Synthesis Agent** : 각 관점의 평가 결과를 종합하여 공통점, 차이점, Trade-off와 분석 한계를 정리한다.
-- **Report Agent** : 검증된 State를 바탕으로 최종 보고서를 작성하고, 본문에 사용된 근거와 참고문헌을 연결한다.
+- **Supervisor** : State의 실행 상태와 근거 충분도를 확인해 다음 Agent를 선택하고 재검색·재작업·종료를 제어한다.
+- **Technical Research Agent** : 핵심 논문에서 기술 구조, KV Cache 배치, 데이터 이동, 실험 결과와 한계 근거를 추출한다.
+- **TRL Evaluation Agent** : 논문, PoC, Prototype, 실환경 검증, 상용 제품 여부를 기준으로 공개 정보 기반 TRL을 평가한다.
+- **Market Evaluation Agent** : 제품화, 실제 도입, 지원 생태계, 시장 성장성과 도입 장벽을 평가한다.
+- **Stakeholder Evaluation Agent** : 경쟁 진영, 도입 기업·개발자, 투자 업계의 기대 효과와 우려를 분석한다.
+- **Domain Evaluation Agent** : 데이터센터 관점에서 용량, 성능, 데이터 이동, 확장성, 비용과 구축 복잡도를 평가한다.
+- **Verification Agent** : 주요 주장별 반대 근거를 검색하고, 상충하는 주장과 조건을 분석한다.
+- **Synthesis Agent** : 관점별 결과를 종합해 공통점, 차이점, trade-off와 분석 한계를 정리한다.
+- **Report Agent** : 검증된 근거와 참고문헌을 연결해 한국어 PDF 보고서의 원문을 작성한다.
+- **Quality Eval Agent** : 생성된 보고서를 규칙과 LLM Judge로 평가해 결과를 State에 기록한다.
+
+## State Schema
+
+`ResearchState`는 Agent 산출물인 작업 페이로드와 Supervisor가 사용하는 제어 메타데이터를 분리한다.
+
+- **제어 vs 페이로드 분리** : 페이로드에는 기술·관점별 근거, 반대 근거, Conflict, 종합 결과, 보고서, 참고문헌과 품질 평가를 저장한다. 제어 영역에는 `trace_id`, `step_count`, `directive`, `node_status`, 재시도·재작업 횟수와 부족 근거를 저장한다.
+- **관측성 위치** : 라우팅 결정 이력은 State에 누적하지 않고 `SUPERVISOR_DECISION` 로그와 LangSmith trace에 남긴다. State에는 현재 `directive`만 유지한다.
+- **지속성 비용** : PDF 원문 청크와 웹 본문 전체는 State에 저장하지 않고 검증된 인용 단위 근거만 유지한다. 실행 결과는 `report.pdf`, `state.json`, `run.json`으로 저장한다.
+- **상관** : 동일한 `trace_id`를 State, 로그, LangSmith metadata, 출력 디렉터리 이름에 사용한다.
+- **재개/복구** : 실행 중 Agent 예외를 `failed` 상태와 `last_error`로 기록하고 Supervisor가 제한된 횟수만 재시도한다. 영속 checkpoint 기반의 프로세스 재개는 현재 연결되어 있지 않다.
+- **동시 처리** : Supervisor가 한 번에 하나의 Agent만 실행하므로 동시 State 쓰기가 없으며 Reducer를 사용하지 않는다.
+- **종료 보장** : Supervisor 결정은 최대 30회, 기술 재검색은 최대 2회, Agent별 재작업과 품질 재작업은 최대 1회로 제한한다. LangGraph의 `recursion_limit`도 이 상한에서 계산한다.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A[기술·도메인 입력] --> B[기술 조사 Agent / RAG]
-    B --> C{1차 근거 충분?}
-    C -->|부족| D{retry_count < max_retries?}
-    D -->|Yes| E[Query Rewrite]
-    E --> B
-    D -->|No| F[missing_evidence 기록]
-    C -->|충분| G[4개 관점 Fan-out]
-    F --> G
-    G --> H[TRL Agent]
-    G --> I[시장 Agent]
-    G --> J[이해관계자 Agent]
-    G --> K[도메인 Agent]
-    H --> L[Fan-in]
-    I --> L
-    J --> L
-    K --> L
-    L --> M{2차 근거 충분?}
-    M -->|부족| N[missing_evidence 기록]
-    M -->|충분| O[Counter-Evidence]
-    N --> O
-    O --> P[Conflict Analysis]
-    P --> Q[Synthesis Agent]
-    Q --> R[Report Agent]
-    R --> S[최종 PDF 보고서]
+    START([START]) --> S{Supervisor}
+    S -. State 기반 라우팅 .-> T[Technical]
+    S -.-> R[TRL]
+    S -.-> M[Market]
+    S -.-> K[Stakeholder]
+    S -.-> D[Domain]
+    S -.-> V[Verification]
+    S -.-> Y[Synthesis]
+    S -.-> P[Report]
+    S -.-> Q[Quality Eval]
+    S -.-> END([END])
+
+    T --> S
+    R --> S
+    M --> S
+    K --> S
+    D --> S
+    V --> S
+    Y --> S
+    P --> S
+    Q --> S
 ```
+
+모든 하위 Agent는 결과를 Supervisor로만 반환하며 서로 직접 연결되지 않는다.
 
 ## Directory Structure
 
 ```text
 ├── data/                  # 논문 PDF, 문서 manifest, 검색 평가 질의
-├── agents/                # 기술·TRL·시장·이해관계자·도메인·종합·보고서 Agent
-├── nodes/                 # 근거 검사, 재검색, 반증, Conflict 노드
-├── rag/                   # PDF 로딩, 청킹, 임베딩, Hybrid Retrieval
+├── agents/                # 기술 조사·관점 평가·종합·보고서 Agent
+├── nodes/                 # 근거 검사, 반대 근거 검증, 품질 평가 Node
+├── rag/                   # PDF 파싱, 청킹, 인덱싱, Hybrid Retrieval
 ├── tools/                 # LLM, Web Search, Query Rewrite, PDF 생성 도구
-├── tests/                 # 자동 테스트
-├── outputs/               # PDF 보고서, State, 로그
+├── tests/                 # 단위·워크플로 테스트
+├── outputs/               # 보고서, 실행 State, 로그
 ├── app.py                 # CLI 실행 스크립트
-├── graph.py               # LangGraph Workflow
-├── state.py               # ResearchState Schema
+├── graph.py               # LangGraph 구성
+├── supervisor.py          # 동적 라우팅과 재작업 제어
+├── state.py               # ResearchState 정의
 └── README.md
 ```
 
 ## Usage
 
 ```bash
-# 의존성 설치
 uv sync --frozen --extra rag --extra dev
-
-# .env에 OPENAI_API_KEY, TAVILY_API_KEY 설정 후 실행
-.venv/bin/python app.py --check
-.venv/bin/python app.py --index
-.venv/bin/python app.py --run
-
-# 외부 API 없이 Graph 흐름 확인
-.venv/bin/python app.py --demo
+cp .env.example .env  # OPENAI_API_KEY, TAVILY_API_KEY 설정
+uv run python app.py --run
 ```
 
-최종 보고서는 `outputs/날짜-실행ID/report.pdf`에 저장된다.
+생성된 보고서와 실행 State는 `outputs/{실행시각}-{trace_id}/`에 저장된다.
 
 ## Contributors
 
-- **백소현** : RAG 파이프라인과 기술 조사 Agent를 구현했다.
-- **윤정수** : TRL·시장 평가 Agent를 구현하고 Web Search 근거를 구조화했다.
-- **전상진** : 이해관계자·도메인 평가 Agent를 구현하고 평가 기준을 정리했다.
-- **전현찬** : LangGraph, State, Fan-out/Fan-in을 포함한 전체 Workflow를 구현했다.
-- **정진우** : Evidence 검사, Query Rewrite, Counter-Evidence, Conflict Node를 구현했다.
-- **정현주** : Synthesis·Report Agent를 구현하고 Reference 연결과 통합 테스트를 담당했다.
+- **백소현** : RAG Pipeline, Technical Research Agent
+- **윤정수** : TRL Evaluation Agent, Market Evaluation Agent, Web Evidence 구조화
+- **전상진** : Stakeholder Evaluation Agent, Domain Evaluation Agent
+- **전현찬** : LangGraph Workflow, State Schema, Supervisor Routing
+- **정진우** : Evidence Validation, Query Rewrite, Counter-Evidence, Conflict Analysis
+- **정현주** : Synthesis Agent, Report Agent, Reference 연결, Integration Test

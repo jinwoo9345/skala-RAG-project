@@ -13,6 +13,10 @@ EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
 EMBEDDING_REVISION = "d128750597153bb5987e10b1c3493a34e5a4502a"
 MAX_DOCUMENT_PAGES = 200
 MAX_RETRIES = 2
+# Supervisor 종료 보장: 결정 횟수 상한, 하위 에이전트별 재작업 상한, 품질 평가 Loop 상한.
+MAX_STEPS = 30
+MAX_REWORK = 1
+MAX_QUALITY_LOOPS = 1
 DOCUMENT_MANIFEST = PROJECT_ROOT / "data" / "documents.json"
 INDEX_DIR = PROJECT_ROOT / "data" / "index"
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
@@ -125,6 +129,9 @@ QUERY_TERMS = {
     "비용과 구축 복잡도": "hardware cost integration complexity",
 }
 
+# 상위 시장 검색어. 두 기술에 같은 검색어를 써서 시장 자료가 한쪽 기술에만 붙지 않게 한다.
+MARKET_TERM = "CXL memory expansion processing near memory"
+
 # 대상 기술을 고유하게 지칭하는 명칭. 약어만으로는 동명이의 자료가 섞인다.
 TECH_PROFILES = {
     "ITME": {
@@ -132,14 +139,14 @@ TECH_PROFILES = {
         "distinctive": ("Inference Tiered Memory Expansion", "Disaggregated CXL-Hybrid"),
         "ambiguous": ("ITME",),
         "search_alias": "ITME CXL-hybrid memory",
-        "market_term": "CXL memory expansion",
+        "market_term": MARKET_TERM,
     },
     "CXL-PIM": {
         "paper_ids": ("2511.00321",),
         "distinctive": ("Scalable Processing-Near-Memory", "PNM-KV", "1M-Token LLM Inference"),
         "ambiguous": ("CXL-PIM", "CXL-PNM", "CXL PNM"),
         "search_alias": "CXL-PNM PNM-KV",
-        "market_term": "CXL processing near memory PIM",
+        "market_term": MARKET_TERM,
     },
 }
 

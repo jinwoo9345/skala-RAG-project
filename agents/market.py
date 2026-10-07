@@ -1,12 +1,7 @@
 """시장 평가: Web Search 자료만 사용한다."""
 
-from agents.common import evaluate, web_sources
+from agents.common import evaluate_perspective
 
 
 def market_agent(state, services):
-    return evaluate(
-        state,
-        services,
-        "market",
-        web_sources(state, services, "market"),
-    )
+    return evaluate_perspective(state, services, "market")

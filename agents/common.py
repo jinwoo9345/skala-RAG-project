@@ -142,8 +142,42 @@ def evaluate(state, services, perspective, sources, evidence=None):
     }
 
 
-def web_sources(state, services, perspective):
-    """기술 × 평가 기준 단위로 검색한다. 기본 1회, 결과가 없을 때만 대체 질의 1회."""
+def rework_items(state, name):
+    """Supervisor가 이 에이전트에게 내린 재작업 대상. 일반 실행이면 None."""
+    directive = state.get("directive") or {}
+    if directive.get("target") != name or not directive.get("missing_items"):
+        return None
+    return {(x["technology"], x["criterion"]) for x in directive["missing_items"]}
+
+
+def merge_analysis(previous, result, perspective):
+    """재작업 결과를 기존 분석에 합친다. 기존 finding은 유지하고 비어 있던 기준만 채운다."""
+    if not previous:
+        return result
+    new = result[f"{perspective}_analysis"]
+    covered = {(f["technology"], f["criterion"]) for f in previous["findings"]}
+    added = [f for f in new["findings"] if (f["technology"], f["criterion"]) not in covered]
+    findings = previous["findings"] + added
+    used = {i for f in added for i in f["evidence_ids"]}
+    covered |= {(f["technology"], f["criterion"]) for f in added}
+    return {
+        f"{perspective}_analysis": {
+            **previous,
+            "findings": findings,
+            "evidence": {**previous["evidence"], **{i: new["evidence"][i] for i in used}},
+            "missing_evidence": [
+                x for x in previous["missing_evidence"] if (x["technology"], x["criterion"]) not in covered
+            ],
+            "limitations": list(dict.fromkeys(previous["limitations"] + new["limitations"])),
+        }
+    }
+
+
+def web_sources(state, services, perspective, wanted=None):
+    """기술 × 평가 기준 단위로 검색한다. 기본 1회, 결과가 없을 때만 대체 질의 1회.
+
+    wanted가 있으면 재작업이므로 해당 (기술, 기준)만 검색하고, 대체 질의를 먼저 시도한다.
+    """
     sources = {}
     for technology in technology_names(state):
         profile = TECH_PROFILES.get(technology, {})
@@ -151,12 +185,16 @@ def web_sources(state, services, perspective):
         alias = profile.get("search_alias", technology)
         rows, seen = [], set()
         for criterion in EVALUATION_CRITERIA[perspective]:
+            if wanted is not None and (technology, criterion) not in wanted:
+                continue
             terms = QUERY_TERMS.get(criterion, criterion)
             if criterion in MARKET_LEVEL_CRITERIA and profile.get("market_term"):
                 # 연구 단계 기술은 개별 시장 자료가 없으므로 상위 시장 단위로 검색한다.
                 queries = (f"{profile['market_term']} {terms}", f"{alias} {terms}")
             else:
                 queries = (f"{primary} {terms}", f"{alias} KV cache {terms}")
+            if wanted is not None:
+                queries = queries[::-1]
             for query in queries:
                 relevant = 0
                 for candidate in web_search(
@@ -179,3 +217,14 @@ def web_sources(state, services, perspective):
                     break
         sources[technology] = rows
     return sources
+
+
+def evaluate_perspective(state, services, perspective, evidence=None):
+    """웹 기반 관점 에이전트 공통 흐름: 일반 실행 또는 Supervisor 재작업."""
+    wanted = rework_items(state, perspective)
+    previous = state[f"{perspective}_analysis"] if wanted else None
+    base = dict(evidence or {})
+    if previous:
+        base.update(previous["evidence"])
+    result = evaluate(state, services, perspective, web_sources(state, services, perspective, wanted), base)
+    return merge_analysis(previous, result, perspective)

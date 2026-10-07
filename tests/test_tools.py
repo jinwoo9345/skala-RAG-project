@@ -21,22 +21,26 @@ class ToolTests(unittest.TestCase):
 
     def test_web_normalizes_deduplicates_and_preserves_snippet_status(self):
         tool = Mock()
+        date = "Mon, 14 Sep 2026 00:00:00 GMT"
         tool.search.return_value = [
             {
                 "url": "https://example.test/p#x",
                 "title": "paper",
                 "content": "a useful search excerpt",
+                "published_date": date,
             },
-            {"url": "https://example.test/p#y", "content": "duplicate"},
-            {"url": "javascript:alert(1)", "content": "bad"},
+            {"url": "https://example.test/p#y", "content": "duplicate", "published_date": date},
+            {"url": "javascript:alert(1)", "content": "bad", "published_date": date},
+            {"url": "https://example.test/undated", "content": "no published date"},
+            {"url": "https://example.test/blog/post", "content": "blog post", "published_date": date},
+            {"url": "https://blog.example.test/post", "content": "blog host", "published_date": date},
         ]
         results = web_search(tool, "query", max_results=3)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["source_url"], "https://example.test/p")
         self.assertEqual(results[0]["content_type"], "snippet")
-        tool.search.assert_called_once_with(
-            query="query", topic="general", max_results=3, format_output=False
-        )
+        self.assertEqual(results[0]["published_date"], "2026-09-14")
+        tool.search.assert_called_once_with(query="query", topic="news", max_results=3, format_output=False)
 
     def test_web_error_is_not_not_found(self):
         tool = Mock()

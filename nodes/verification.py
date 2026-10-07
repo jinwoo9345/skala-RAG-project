@@ -153,3 +153,9 @@ def conflict_node(state, services):
         )
     get_logger().info("CONFLICT_RESULT | conflicts=%d", len(conflicts))
     return {"conflicts": conflicts}
+
+
+def verification_node(state, services):
+    """Supervisor가 호출하는 확증 편향 방지 에이전트: 반대 근거 검색 후 Conflict 분석."""
+    counter = counter_evidence_node(state, services)
+    return {**counter, **conflict_node({**state, **counter}, services)}

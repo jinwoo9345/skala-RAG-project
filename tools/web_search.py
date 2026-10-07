@@ -6,6 +6,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 from langchain_teddynote.tools.tavily import TavilySearch
 
+from email.utils import parsedate_to_datetime
+
 from config import EXCLUDED_WEB_DOMAINS, TECH_PROFILES, source_tier
 from workflow_logging import get_logger, log_operation
 
@@ -15,6 +17,26 @@ def canonical_url(url: str) -> str:
     if parts.scheme not in ("https", "http") or not parts.netloc or parts.username:
         return ""
     return urlunsplit((parts.scheme, parts.netloc.lower(), parts.path, parts.query, ""))
+
+
+def blog_url(url: str) -> bool:
+    """블로그 글인지 확인한다: /blog·/blogs(·*_blogs_N) 경로, blog. 서브도메인."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    return host.startswith(("blog.", "blogs.")) or bool(
+        re.search(r"(^|/)[\w-]*blogs?([_-]\w*)?(/|$)", parts.path.lower())
+    )
+
+
+def published_day(value: str) -> str:
+    """Tavily 발행일(RFC 2822 또는 ISO)을 YYYY-MM-DD로 바꾼다. 해석할 수 없으면 빈 문자열."""
+    if not value:
+        return ""
+    try:
+        return parsedate_to_datetime(value).date().isoformat()
+    except (TypeError, ValueError):
+        match = re.match(r"\d{4}-\d{2}-\d{2}", value)
+        return match.group(0) if match else ""
 
 
 def excluded_web_domain(url: str) -> bool:
@@ -69,6 +91,10 @@ def normalize_web_results(results: list[dict]) -> list[dict]:
     sources, seen = [], set()
     for row in results:
         url = canonical_url(row.get("url", ""))
+        published = published_day(row.get("published_date") or "")
+        # 발행일을 확인할 수 있는 자료만 쓰고, 블로그 글은 제외한다.
+        if not published or blog_url(url):
+            continue
         content = row.get("raw_content") or row.get("content") or ""
         # LLM은 인용 시 마크다운 기호를 지우므로, 원문에서도 미리 지워 인용문 대조를 맞춘다.
         content = re.sub(r"\*\*|__|^#+\s*", "", content, flags=re.MULTILINE)
@@ -91,7 +117,7 @@ def normalize_web_results(results: list[dict]) -> list[dict]:
                 "role": "web",
                 "content": content[:12000],
                 "content_type": "full_text" if row.get("raw_content") else "snippet",
-                "published_date": row.get("published_date") or "",
+                "published_date": published,
                 "author": row.get("author") or "",
                 "source_type": "web",
                 "site_name": urlsplit(url).netloc,
@@ -108,9 +134,10 @@ def normalize_web_results(results: list[dict]) -> list[dict]:
 @log_operation("WEB_SEARCH")
 def web_search(tool, query: str, *, max_results: int | None = None) -> list[dict]:
     """수업 예제의 ``tavily_tool.search`` 호출을 그대로 사용한다."""
+    # Tavily는 topic="news"일 때만 결과별 발행일(published_date)을 제공한다.
     results = tool.search(
         query=query,
-        topic="general",
+        topic="news",
         max_results=max_results,
         format_output=False,
     )

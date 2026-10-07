@@ -2,7 +2,6 @@
 
 import json
 import re
-from datetime import date
 
 from config import PERSPECTIVES
 from evidence import all_evidence, collect_references, valid_ids
@@ -49,14 +48,14 @@ CHAPTERS = {
 }
 
 
-def _reference_text(index, ref, accessed):
-    """확인된 서지 항목만 쓴다. 웹 자료는 저자·발행일 대신 접근일로 출처 시점을 남긴다."""
+def _reference_text(index, ref):
+    """확인된 서지 항목만 쓴다."""
     author = ref["author"]
     date = str(ref["year"] or ref["published_date"] or "")
     byline = f"{author} ({date}). " if author and date else f"{author}. " if author else f"({date}). " if date else ""
     if ref.get("source_type") == "web":
         place = ", ".join(x for x in (ref.get("site_name"), ref["source_url"]) if x)
-        return f"{index}. {byline}{ref['source']}. {place} (접근일: {accessed})"
+        return f"{index}. {byline}{ref['source']}. {place}"
     place = ", ".join(x for x in (ref.get("venue"), ref.get("identifier"), ref["source_url"]) if x)
     return f"{index}. {byline}{ref['source']}. {place}"
 
@@ -111,6 +110,10 @@ def synthesis_fallback(state):
     return {"5.1": common, "5.2": differences, "5.3": tradeoffs, "5.4": conclusion}
 
 
+def _normalize(text):
+    return re.sub(r"\s+", " ", re.sub(r"⟦CITE:[^⟧]+⟧", "", text)).strip().lower()
+
+
 def _unique_lines(lines, limit=None):
     result, seen = [], set()
     for line in lines:
@@ -136,40 +139,15 @@ def _gap_summary(gaps):
         "stakeholder": "이해관계자",
         "domain": "데이터센터 적용성",
     }
+    if not grouped:
+        return []
     return [
-        (
-            f"- {technology}의 {labels.get(perspective, perspective)}에서 공개 직접 근거가 제한된 항목: "
-            f"{', '.join(dict.fromkeys(items))}. 이는 부정적 판정이 아니라 현재 공개 자료로 확정할 수 있는 "
-            "범위의 한계이며, 관련 생태계·구조적 근거는 해당 평가 절에 별도로 제시했다."
-        )
+        "공개 자료로 직접 근거를 확인하지 못한 항목은 아래와 같다. "
+        "이는 부정적 판정이 아니라 현재 공개 자료로 확정할 수 있는 범위의 한계이다."
+    ] + [
+        f"- {technology} · {labels.get(perspective, perspective)}: {', '.join(dict.fromkeys(items))}"
         for (technology, perspective), items in grouped.items()
     ]
-
-
-def _market_context_lines(state, technologies):
-    """직접 제품화·도입 근거가 없는 항목만 제한 사항으로 표시한다."""
-    findings = state["market_analysis"].get("findings", [])
-    lines = []
-    if any(finding.get("evidence_scope") == "ecosystem" for finding in findings):
-        lines.append(
-            "CXL·KV Cache 상위 시장과 생태계 근거는 개별 기술의 "
-            "제품화·실제 도입 Fact와 분리해 해석한다."
-        )
-    criteria = ("제품화", "실제 도입")
-    for technology in technologies:
-        confirmed = {
-            finding.get("criterion")
-            for finding in findings
-            if finding.get("technology") == technology
-            and finding.get("evidence_scope") == "direct"
-        }
-        missing = [criterion for criterion in criteria if criterion not in confirmed]
-        if missing:
-            lines.append(
-                f"{technology}의 공개 직접 근거가 제한된 시장성 항목: "
-                f"{'·'.join(missing)}. 이는 현재 검색·검증된 자료 범위의 한계이다."
-            )
-    return lines
 
 
 def trl_levels(state, technology):
@@ -199,12 +177,38 @@ def trl_summary(state, technologies):
         basis = ", ".join(
             f"TRL {level}({', '.join(dict.fromkeys(criteria))})" for level, criteria in sorted(levels.items())
         )
-        lines.append(
-            f"- {technology}: 추정 TRL {low}~{high}. 평가 기준에 따라 판정이 갈렸다({basis}). "
-            "연구·프로토타입 수준 근거와 실환경에 가까운 실증 근거가 함께 확인되어 판단 경계에 있으므로 "
-            "단일 값으로 확정하지 않고 범위로 제시한다."
-        )
+        lines.append(f"- {technology}: 추정 TRL {low}~{high} ({basis}). 기준별 판정이 달라 범위로 제시한다.")
     return lines
+
+
+# 독자에게 의미 없는 내부 처리 메모. 평가 한계 목록에서 제외한다.
+INTERNAL_NOTES = (
+    "근거 ID 또는 평가 항목 검증 실패",
+    "낮은 등급의 웹 자료만으로 작성된 Fact를 제외함",
+    "개별 기술의 직접 근거가 없는 제품화·도입 주장을 제외함",
+)
+TRL_NOTE = "공개 정보 기반 추정 TRL이며 공식 인증값이 아님."
+SECTION_BY_PERSPECTIVE = {"trl": "4.1", "market": "4.2", "stakeholder": "4.3", "domain": "4.4"}
+MAX_LIMITATIONS = 2
+MAX_CONFLICTS = 3
+
+
+def _limitation_text(text):
+    text = text.replace(TRL_NOTE, "").strip()
+    if not text or any(note in text for note in INTERNAL_NOTES) or text.startswith("TRL"):
+        return ""
+    return text
+
+
+def _page_markers(pages):
+    """[1, 8, 9, 10] → '1·8–10'. 같은 문헌의 여러 페이지를 한 번에 표기한다."""
+    pages = sorted(set(pages))
+    groups, start = [], pages[0]
+    for prev, cur in zip(pages, pages[1:] + [None]):
+        if cur != prev + 1 if cur is not None else True:
+            groups.append(str(start) if start == prev else f"{start}–{prev}")
+            start = cur
+    return "·".join(groups)
 
 
 EVIDENCE_ID = r"(?:[\w-]+-p\d+-c\d+-[0-9a-f]{8}-[0-9a-f]{10}|web-[0-9a-f]{16}-[0-9a-f]{10}|counter-[0-9a-f]{16})"
@@ -236,54 +240,60 @@ def _render_report(state, draft, *, mode="live"):
             f"- {selection['name']} ({selection['category']}): {selection['key_approach']} - "
             f"{selection['selection_reason']}"
         )
-    section_by_perspective = {"trl": "4.1", "market": "4.2", "stakeholder": "4.3", "domain": "4.4"}
-    for perspective, section_id in section_by_perspective.items():
+    ecosystem = {section_id: [] for section_id in SECTION_BY_PERSPECTIVE.values()}
+    for perspective, section_id in SECTION_BY_PERSPECTIVE.items():
         analysis = state[f"{perspective}_analysis"]
+        limitations = []
         for finding in analysis.get("findings", []):
-            label = f"[{finding['kind']}] {finding['technology']}: {finding['claim']}"
-            if finding.get("evidence_scope") == "ecosystem":
-                label += " (상위 시장·생태계 근거를 이용한 제한적 해석)"
-            elif finding.get("evidence_scope") == "comparison":
-                label += " (비교 기술 근거를 이용한 구조적 해석)"
+            kind = "" if finding["kind"] == "Fact" else f" ({finding['kind']})"
             if finding.get("trl_level") is not None:
-                spread = trl_levels(state, finding["technology"])
-                label += (
-                    f" (공개 정보 기반 추정 TRL {min(spread)}~{max(spread)} 중 "
-                    f"{finding.get('criterion', '해당 기준')} 판정 {finding['trl_level']})"
-                    if len(spread) > 1
-                    else f" (공개 정보 기반 추정 TRL {finding['trl_level']})"
-                )
+                kind += f" (판정 TRL {finding['trl_level']})"
+            speakers = []
             if perspective == "stakeholder":
-                speakers = []
                 for eid in finding["evidence_ids"]:
                     item = evidence.get(eid, {})
                     if item.get("speaker") or item.get("affiliation"):
                         speakers.append(
                             " / ".join(x for x in (item.get("speaker"), item.get("affiliation")) if x)
                         )
-                if speakers:
-                    label += " (발언자·소속: " + ", ".join(dict.fromkeys(speakers)) + ")"
+            speaker = f" (발언: {', '.join(dict.fromkeys(speakers))})" if speakers else ""
+            if finding.get("evidence_scope") == "ecosystem":
+                # 상위 시장·생태계 자료는 두 기술 공통 맥락이므로 기술 이름을 붙이지 않는다.
+                text = cited(
+                    {"text": f"[{finding['criterion']}] {finding['claim']}{kind}{speaker}", "evidence_ids": finding["evidence_ids"]}
+                )
+                if text:
+                    ecosystem[section_id].append("- " + text)
+                continue
+            scope = " (비교 기술 근거)" if finding.get("evidence_scope") == "comparison" else ""
+            label = f"[{finding['criterion']}] {finding['technology']}: {finding['claim']}{kind}{scope}{speaker}"
             text = cited({"text": label, "evidence_ids": finding["evidence_ids"]})
             if text:
                 supplemental[section_id].append("- " + text)
-                if finding.get("limitation"):
-                    section_limitations[section_id].append(
-                        f"- {finding['technology']} 평가 한계: {finding['limitation']}"
-                    )
-        section_limitations[section_id].extend(
-            "- 공통 평가 한계: " + limitation for limitation in analysis.get("limitations", [])
+                if limitation := _limitation_text(finding.get("limitation", "")):
+                    limitations.append(f"- 평가 한계({finding['technology']}): {limitation}")
+        limitations.extend(
+            f"- 평가 한계: {text}" for x in analysis.get("limitations", []) if (text := _limitation_text(x))
         )
+        if ecosystem[section_id]:
+            supplemental[section_id].append(
+                "상위 시장·생태계 맥락 (두 기술 공통, 개별 기술의 제품화·도입 근거 아님):"
+            )
+            supplemental[section_id].extend(_unique_lines(ecosystem[section_id]))
+        section_limitations[section_id].extend(_unique_lines(limitations, limit=MAX_LIMITATIONS))
 
     for section_id, limitations in section_limitations.items():
-        supplemental[section_id].extend(_unique_lines(limitations, limit=4))
+        supplemental[section_id].extend(limitations)
 
     technical_items = set()
+    # 3장 항목별 bullet은 서술 문단과 내용이 겹치므로, 서술이 없을 때만 대체 내용으로 쓴다.
+    technical_bullets = {"3.1": [], "3.2": []}
     for eid, item in state["technical_evidence"].items():
         if item["technology"] not in technologies:
             continue
         section_id = "3.1" if item["technology"] == technologies[0] else "3.2"
         item_key = (item["technology"], item.get("item"))
-        if item_key in technical_items:
+        if item_key in technical_items or item.get("item") == "출처":
             continue
         technical_items.add(item_key)
         condition = item.get("experimental_condition")
@@ -297,43 +307,21 @@ def _render_report(state, draft, *, mode="live"):
             }
         )
         if text:
-            supplemental[section_id].append("- " + text)
+            technical_bullets[section_id].append("- " + text)
 
-    first_by_technology = {
-        technology: next(
-            (item for item in state["technical_evidence"].values() if item["technology"] == technology),
+    # 1.1 문제 정의를 LLM이 채우지 못했을 때 쓸 대체 내용: 기술별 KV Cache 저장 위치 근거.
+    problem_background = []
+    for technology in technologies:
+        item = next(
+            (
+                (eid, x)
+                for eid, x in state["technical_evidence"].items()
+                if x["technology"] == technology and x.get("item") == "KV Cache 저장 위치"
+            ),
             None,
         )
-        for technology in technologies
-    }
-    background = [item for item in first_by_technology.values() if item]
-    if background:
-        text = cited(
-            {
-                "text": (
-                    "장문맥 LLM 추론의 KV Cache 문제를 대상으로, 외부 계층형 메모리 확장과 "
-                    "메모리 근접 연산이 용량·데이터 이동·구축 복잡도에 미치는 영향을 비교한다."
-                ),
-                "evidence_ids": [item["evidence_id"] for item in background],
-            }
-        )
-        if text:
-            supplemental["1.1"].append(text)
-
-    if len(background) == len(technologies):
-        text = cited(
-            {
-                "text": (
-                    f"{technologies[0]}는 {state['technologies'][0]['key_approach']}을 중심으로 하고, "
-                    f"{technologies[1]}은 {state['technologies'][1]['key_approach']}을 중심으로 한다. "
-                    "따라서 동일 조건의 단순 성능 서열보다 저장 위치, 연산 위치와 데이터 이동 경로의 차이를 "
-                    "중심으로 해석해야 한다."
-                ),
-                "evidence_ids": [item["evidence_id"] for item in background],
-            }
-        )
-        if text:
-            supplemental["3.3"].append(text)
+        if item and (text := cited({"text": f"{technology}: {item[1]['claim']}", "evidence_ids": [item[0]]})):
+            problem_background.append(text)
 
     for counter in state["counter_evidence"].values():
         if counter["status"] == "found":
@@ -351,14 +339,13 @@ def _render_report(state, draft, *, mode="live"):
             # 아래 6.3 검증 요약에서 한 번만 설명한다.
             continue
 
-    for conflict in state["conflicts"]:
-        description = conflict["description"]
-        if conflict.get("conditions"):
-            description += " 조건: " + conflict["conditions"]
-        description += " 해석: " + conflict["implication"]
-        text = cited({"text": description, "evidence_ids": conflict["evidence_ids"]})
+    for conflict in state["conflicts"][:MAX_CONFLICTS]:
+        text = cited({"text": conflict["description"], "evidence_ids": conflict["evidence_ids"]})
         if text:
-            supplemental["5.2"].append("- 상충·비교 제한: " + text)
+            supplemental["5.2"].append(f"- {conflict['category']}: {text}")
+            if conflict.get("conditions"):
+                supplemental["5.2"].append("  - 조건: " + conflict["conditions"])
+            supplemental["5.2"].append("  - 해석: " + conflict["implication"])
 
     lines = ["# ITME와 CXL-PIM 데이터센터 적용성 비교 평가", ""]
     if mode != "live":
@@ -367,12 +354,14 @@ def _render_report(state, draft, *, mode="live"):
     # SUMMARY 길이는 글자 기준 700자 이내; 실제 반 페이지 여부는 편집 단계에서 확인.
     length = 0
     for paragraph in state["synthesis"].get("summary", []):
-        if length + len(paragraph["text"]) > 700:
+        if length + len(paragraph["text"]) > 900:
             continue
         text = cited(paragraph)
         if text:
-            lines.extend([text, ""])
+            lines.append("- " + text)
             length += len(paragraph["text"])
+    if length:
+        lines.append("")
     if not length:
         candidates = state["synthesis"].get("conclusion", []) or fallback.get("5.4", [])
         for paragraph in candidates[:1]:
@@ -390,6 +379,7 @@ def _render_report(state, draft, *, mode="live"):
                     "",
                 ]
             )
+    printed = set()
     content = {}
     for section in draft.get("sections", []):
         if section["section_id"] in SECTIONS:
@@ -401,23 +391,30 @@ def _render_report(state, draft, *, mode="live"):
         lines.extend([f"### {section_id} {title}", ""])
         paragraphs = [cited(p) for p in content.get(section_id, [])]
         paragraphs = [p for p in paragraphs if p]
+        if section_id in SECTION_BY_PERSPECTIVE.values():
+            # 관점별 finding이 아래에 목록으로 나오므로, LLM 서술은 도입 문단 하나만 쓴다.
+            paragraphs = paragraphs[:1]
+        if section_id == "1.1" and not paragraphs:
+            paragraphs = problem_background
+        elif section_id == "2.3" and not paragraphs:
+            first, second = state["technologies"][:2]
+            paragraphs = [
+                f"두 기술은 모두 CXL로 KV Cache의 메모리 한계를 다루지만, {first['name']}는 "
+                f"{first['key_approach']}, {second['name']}은 {second['key_approach']}으로 접근 방식이 달라 "
+                "저장 위치·연산 위치·데이터 이동 경로의 차이를 비교하기 위해 선정했다."
+            ]
         if section_id == "1.2":
             paragraphs.insert(
-                0, f"분석 범위는 {state['domain']}에서 ITME와 CXL-PIM의 KV Cache 관리 방식이다."
+                0,
+                f"분석 범위는 {state['domain']} 환경에서 ITME와 CXL-PIM의 KV Cache 관리 방식이다. "
+                "두 기술을 기술 성숙도, 시장성, 이해관계자, 데이터센터·클라우드 적용성의 4개 관점에서 "
+                "공개 논문과 웹 자료로 평가하며, 기술 간 우열이 아니라 관점별 특징과 한계를 정리한다.",
             )
-        elif section_id == "2.3":
-            paragraphs.insert(
-                0, "비교 기술은 설계서에서 사람이 선정했으며 자동 기술 선정 Agent는 사용하지 않았다."
-            )
+        elif section_id in ("3.1", "3.2") and not paragraphs:
+            paragraphs = technical_bullets[section_id]
         elif section_id == "4.1":
             paragraphs = trl_summary(state, technologies) + paragraphs
-            paragraphs.append(
-                "TRL은 공개 정보 기반 추정이며 공식 인증값이 아니다. "
-                "아래 개별 항목의 TRL은 각 평가 기준에서 판정한 값이며, "
-                "기준 간 차이가 있는 경우 위의 통합 범위를 기준으로 해석한다."
-            )
-        elif section_id == "4.2":
-            paragraphs = _market_context_lines(state, technologies) + paragraphs
+            paragraphs.append("TRL은 공개 정보 기반 추정이며 공식 인증값이 아니다.")
         elif section_id == "6.1":
             paragraphs.extend(_gap_summary(state["missing_evidence"]))
             low_tier = sum(
@@ -435,14 +432,20 @@ def _render_report(state, draft, *, mode="live"):
             )
         elif section_id == "6.3":
             found = sum(x["status"] == "found" for x in state["counter_evidence"].values())
+            reworks = sum(state["rework_counts"].get(p, 0) for p in PERSPECTIVES)
             paragraphs.append(
-                f"기술 재검색 {state['retry_count']}회, 주요 주장별 반대 근거 검색 "
+                f"기술 재검색 {state['retry_count']}회, 관점별 재조사 {reworks}회, 주요 주장별 반대 근거 검색 "
                 f"{len(state['counter_evidence'])}회, 반대 근거 채택 {found}건. "
                 "반대 근거 미발견은 원 주장의 참을 입증하지 않는다. "
                 "인용문 일치는 자동 확인했으나 주장과 인용의 의미적 일치에는 사람의 검토가 필요하다."
             )
         paragraphs.extend(supplemental[section_id])
-        paragraphs = _unique_lines(paragraphs)
+        # 같은 문단이 여러 절에 반복되면 처음 나온 절에만 남긴다(목록 표지·하위 줄은 제외).
+        paragraphs = [
+            p for p in _unique_lines(paragraphs)
+            if p.startswith(("- ", "  - ")) or _normalize(p) not in printed
+        ]
+        printed.update(_normalize(p) for p in paragraphs)
         if not paragraphs and fallback.get(section_id):
             # Synthesis가 탈락한 절은 이미 검증된 finding·conflict로 재조합한다.
             get_logger().info(
@@ -464,7 +467,6 @@ def _render_report(state, draft, *, mode="live"):
     refs = collect_references({eid: evidence[eid] for eid in sorted(used)})
     by_eid = {eid: index for index, ref in enumerate(refs, 1) for eid in ref["evidence_ids"]}
     lines.extend(["", "## REFERENCE", ""])
-    accessed = date.today().isoformat()
     for index, ref in enumerate(refs, 1):
         tier = min(
             (
@@ -475,16 +477,22 @@ def _render_report(state, draft, *, mode="live"):
             default=5,
         )
         lines.append(
-            _reference_text(index, ref, accessed) + f" [출처 등급 {tier}: {SOURCE_TIER_LABELS[tier]}]"
+            _reference_text(index, ref) + f" [출처 등급 {tier}: {SOURCE_TIER_LABELS[tier]}]"
         )
 
     def replace_citation(match):
-        markers = []
+        pages = {}
         for eid in match.group(1).split("|"):
-            page = evidence[eid].get("page")
-            marker = str(by_eid[eid]) + (f", p.{page}" if page is not None else "")
-            if marker not in markers:
-                markers.append(marker)
+            pages.setdefault(by_eid[eid], [])
+            if evidence[eid].get("page") is not None:
+                pages[by_eid[eid]].append(evidence[eid]["page"])
+        markers = []
+        for index, numbers in pages.items():
+            if not numbers:
+                markers.append(str(index))
+            else:
+                prefix = "p." if len(set(numbers)) == 1 else "pp."
+                markers.append(f"{index}, {prefix}{_page_markers(numbers)}")
         return "[" + "; ".join(markers) + "]"
 
     report = re.sub(r"⟦CITE:([^⟧]+)⟧", replace_citation, "\n".join(lines) + "\n")
@@ -531,11 +539,23 @@ def contents_writer(state, services):
             for eid, item in all_evidence(state).items()
         },
         "synthesis": state["synthesis"],
-        "analyses": {p: state[f"{p}_analysis"] for p in PERSPECTIVES},
+        "analyses": {
+            p: {
+                **state[f"{p}_analysis"],
+                "limitations": [
+                    t for x in state[f"{p}_analysis"].get("limitations", []) if (t := _limitation_text(x))
+                ],
+            }
+            for p in PERSPECTIVES
+        },
         "conflicts": state["conflicts"],
         "counter_evidence": state["counter_evidence"],
         "missing_evidence": state["missing_evidence"],
     }
+    directive = state.get("directive") or {}
+    if directive.get("target") == "report" and directive.get("missing_items"):
+        # 품질 평가 미달로 Supervisor가 재작성을 지시한 경우, 실패 항목과 사유를 함께 전달한다.
+        payload["quality_feedback"] = directive["missing_items"]
     return services.report_writer.invoke(
         {"data": json.dumps(payload, ensure_ascii=False), "payload": payload}
     )

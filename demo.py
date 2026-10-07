@@ -6,6 +6,7 @@ from schemas import (
     CounterResult,
     Evaluation,
     Extraction,
+    QualityJudgement,
     ReportDraft,
     Synthesis,
 )
@@ -40,6 +41,7 @@ class DemoWeb:
             {
                 "url": "https://example.test/demo/web",
                 "title": "DEMO 가상 웹 자료",
+                "published_date": "Mon, 14 Sep 2026 00:00:00 GMT",
                 "content": "DEMO web evidence for workflow testing only. No real technology facts. "
                 "This synthetic claim has a synthetic limitation.",
             }
@@ -75,6 +77,7 @@ class DemoLLM:
     def __init__(self, scenario="normal"):
         self.scenario = scenario
         self.technical_calls = {}
+        self.quality_calls = 0
 
     def generate(self, task, instructions, payload, schema, *, judge=False):
         if schema is Extraction:
@@ -149,6 +152,17 @@ class DemoLLM:
                 else []
             )
             return Synthesis(summary=text, commonalities=text, differences=[], tradeoffs=[], conclusion=text)
+        if schema is QualityJudgement:
+            # quality_fail: 첫 평가만 중립성 미달로 판정해 재작업 Loop를 확인한다.
+            self.quality_calls += 1
+            fail = self.scenario == "quality_fail" and self.quality_calls == 1
+            names = ("groundedness", "neutrality", "bias_control", "coverage")
+            return QualityJudgement(
+                items=[
+                    {"name": name, "passed": not (fail and name == "neutrality"), "reason": "DEMO 판정"}
+                    for name in names
+                ]
+            )
         raise ValueError("지원하지 않는 demo schema")
 
 
