@@ -7,13 +7,13 @@
 ## Overview
 
 - **Objective** : ITME와 CXL-PIM을 복수 관점에서 비교하고, 주장별 근거와 출처를 포함한 PDF 보고서를 생성한다.
-- **Pattern** : **Supervisor** — 관점별 근거 확보 상태가 서로 다르므로, 중앙 Supervisor가 State를 읽고 필요한 Agent만 선택하거나 부족한 항목만 재조사하도록 제어한다.
-- **동적 처리** : Agent를 고정된 엣지 순서로 실행하지 않는다. Supervisor가 기술 근거의 충분성, 관점별 평가 기준의 커버리지, Agent 실패 여부, 보고서 품질 평가 결과를 매 단계 확인하여 다음 Agent를 결정한다. 근거가 부족하면 해당 항목만 재검색하고, 품질 평가에 실패하면 허용 범위 안에서 보고서 또는 관점 분석을 다시 수행한다.
+- **Pattern : Supervisor** — **선정 이유** : 관점별 근거 확보 상태가 서로 다르므로, 중앙 Supervisor가 State를 읽고 필요한 Agent만 선택하거나 부족한 항목만 재조사하는 구조가 적합하다.
+- **동적 처리** : 고정된 노드 순서나 정해진 스텝 수를 사용하지 않는다. Supervisor가 현재 State의 수집된 관점, 근거 충분도, Agent 실패 여부, 품질 평가 결과를 매 단계 확인하여 `add_conditional_edges`의 다음 대상을 결정한다. 근거가 부족하면 해당 기술 또는 관점 Agent만 재호출하고, 품질 평가에 실패하면 보고서나 비어 있는 관점을 허용 횟수 안에서 다시 처리한다.
 
 ## Selected Technologies
 
-- **SW/System : ITME** — CXL-hybrid memory와 NVMe를 계층화하고, 예측 가능한 KV Cache 접근에 맞춰 사용자 수준 prefetch 제어와 DMA/RDMA 데이터 이동을 조정하는 시스템 접근이다. 본 프로젝트에서는 HW/SW co-design인 ITME 중 메모리 배치와 prefetch 제어를 중심으로 소프트웨어·시스템 진영으로 분류한다.
-- **HW : CXL-PIM** — CXL memory 내부 PNM 가속기에서 token page selection과 attention 연산을 수행하여 GPU로의 KV Cache 이동과 GPU 메모리 사용량을 줄이는 하드웨어 접근이다.
+- **SW : ITME** — **선정 이유** : 예측 가능한 KV Cache 접근을 이용해 사용자 수준 prefetch API와 DMA/RDMA 데이터 이동을 제어하는 시스템 소프트웨어 관점의 최적화를 평가할 수 있다. ITME는 CXL-hybrid memory와 NVMe를 포함하는 HW/SW co-design이지만, 본 비교에서는 메모리 배치와 prefetch 제어를 SW 진영의 평가 대상으로 삼는다.
+- **HW : CXL-PIM** — **선정 이유** : CXL memory 내부 PNM 가속기에서 token page selection과 attention 연산을 수행하므로, 연산 위치를 메모리 가까이 이동해 GPU 메모리 사용량과 KV Cache 전송을 줄이는 하드웨어 접근을 평가할 수 있다.
 
 ## Features
 
