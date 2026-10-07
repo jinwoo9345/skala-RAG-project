@@ -69,7 +69,7 @@ class ResearchState(TypedDict):
     directive: Directive | None  # 현재 지시. 이전 지시는 누적하지 않는다.
     node_status: dict[str, str]  # 에이전트별 done/failed/stale. 재개·재시도 판단용
     rework_counts: dict[str, int]  # 관점 에이전트·품질 Loop의 재작업 횟수
-    last_error: str | None
+    last_error: str | None  # 마지막 실패(에이전트: 예외 유형). 이후 성공으로 지우지 않는다.
     search_queries: list[str]  # 기술 조사의 현재 검색 질의(덮어쓰기)
     retry_count: int  # 기술 조사 재검색 횟수
     max_retries: int

@@ -160,10 +160,13 @@ def main(argv=None):
                         raise ValueError("재개할 체크포인트 없음")
                     logger.info("RUN_RESUME | step=%d | next=%s", snapshot.values["step_count"], snapshot.next)
                 result = graph.invoke(None if args.resume else state, config=config)
-            if not result["final_report"]:
-                raise RuntimeError("보고서 생성 실패: " + str(result["last_error"]))
-            pdf = save_outputs(result, settings, run_id, args.output_dir, services.mode)
-            logger.info("REPORT_SAVED | file=%s", pdf)
+                if not result["final_report"]:
+                    raise RuntimeError("보고서 생성 실패: " + str(result["last_error"]))
+                pdf = save_outputs(result, settings, run_id, args.output_dir, services.mode)
+                logger.info("REPORT_SAVED | file=%s", pdf)
+                # 저장까지 끝난 실행은 재개할 필요가 없으므로 체크포인트를 지워 파일이 누적되지 않게 한다.
+                # 저장 전에 실패하면 체크포인트가 남아 --resume으로 다시 시도할 수 있다.
+                checkpointer.delete_thread(run_id)
             logger.info(
                 "RUN_DONE | elapsed=%.3fs | chars=%d | missing=%d | steps=%d | reworks=%s | quality=%s",
                 perf_counter() - started,

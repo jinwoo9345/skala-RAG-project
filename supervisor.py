@@ -42,6 +42,10 @@ def _missing_evidence(state):
         if row["stage"] == 2 and row["perspective"] in done:
             reworked = state["rework_counts"].get(row["perspective"], 0) >= MAX_REWORK
             rows.append({**row, "status": "recorded" if reworked else "pending"})
+        elif row["stage"] == 2 and state["node_status"].get(row["perspective"]) == "failed" and not (
+            _can_retry_failure(state, row["perspective"])
+        ):
+            rows.append({**row, "reason": "관점 에이전트 실패(재시도 소진)", "status": "failed"})
         elif row["stage"] == 2:
             unrun.append(row)
     return rows, unrun
@@ -133,8 +137,11 @@ def decide(state, llm=None):
         return rework("technical", "기술 조사 실패 재시도")
     first_gaps = [x for x in missing if x["stage"] == 1]
     if first_gaps and state["retry_count"] < state["max_retries"]:
+        # 재검색 횟수는 지시 시점에 올린다: technical이 실패해도 횟수가 남아 재시도 한도가 지켜진다.
         items = [{"technology": x["technology"], "item": x["item"]} for x in first_gaps]
-        return "technical", f"기술 근거 부족 {len(items)}건 재검색", items, updates
+        retry = state["retry_count"] + 1
+        reason = f"기술 근거 부족 {len(items)}건 재검색 ({retry}/{state['max_retries']})"
+        return "technical", reason, items, {**updates, "retry_count": retry}
 
     # 3. 아직 수집되지 않았거나 실패한 관점. 여럿이면 State를 보고 다음 관점을 고른다.
     pending = [p for p in PERSPECTIVES if _needs_run(state, p) or _can_retry_failure(state, p)]

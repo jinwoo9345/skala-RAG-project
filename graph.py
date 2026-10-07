@@ -51,7 +51,8 @@ def build_graph(run_id="standalone", services=None, checkpointer=None):
                     "node_status": {**state["node_status"], name: "failed"},
                     "last_error": f"{name}: {type(exc).__name__}",
                 }
-            return {**result, "node_status": {**state["node_status"], name: "done"}, "last_error": None}
+            # last_error는 지우지 않는다: 이후 노드가 성공해도 최종 State에 마지막 실패가 남는다.
+            return {**result, "node_status": {**state["node_status"], name: "done"}}
 
         return invoke
 

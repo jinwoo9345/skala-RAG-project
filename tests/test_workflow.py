@@ -129,6 +129,32 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(state["node_status"]["market"], "failed")
         self.assertEqual(state["rework_counts"]["market"], 1)
         self.assertTrue(state["final_report"])
+        # 재시도까지 실패한 관점은 부족 근거와 보고서 한계에 남고, 마지막 에러도 지워지지 않는다.
+        failed = {x["perspective"] for x in state["missing_evidence"] if x["status"] == "failed"}
+        self.assertIn("market", failed)
+        self.assertIn("시장성 (조사 실패)", state["final_report"])
+        self.assertIsNotNone(state["last_error"])
+
+    def test_persistent_technical_failure_respects_retry_limit(self):
+        services = demo_services()
+        calls = []
+
+        class BrokenRetriever:
+            def search(self, *args, perspective, **kwargs):
+                calls.append(perspective)
+                raise RuntimeError("index down")
+
+        services.retriever = BrokenRetriever()
+        state, _ = self.run_scenario(services=services, max_retries=2)
+        # 기술 조사는 첫 검색에서 실패하므로 검색 호출 수 = 실행 수.
+        # 최초 1회 + 실패 재시도 1회 + 재검색 max_retries(2)회 = 4회에서 멈춘다.
+        self.assertEqual(calls.count("technical"), 4)
+        self.assertEqual(state["retry_count"], 2)
+        self.assertEqual(state["rework_counts"]["technical"], 1)
+        self.assertEqual(state["node_status"]["technical"], "failed")
+        self.assertLess(state["step_count"], state["max_steps"])
+        self.assertEqual(state["node_status"]["quality_eval"], "done")
+        self.assertTrue(state["final_report"])
 
     def test_counter_found_is_cited_and_saved_in_final_references(self):
         state, _ = self.run_scenario("counter_found")
@@ -197,6 +223,11 @@ class WorkflowTests(unittest.TestCase):
             run_id = next(Path(directory).glob("logs/*.log")).stem.rsplit("-", 1)[-1]
             self.assertEqual(main([*common, "--resume", run_id]), 0)
             self.assertEqual(len(list(Path(directory).glob(f"*-{run_id}/report.pdf"))), 1)
+            # 저장이 끝난 실행의 체크포인트는 지워진다.
+            import sqlite3
+
+            with sqlite3.connect(Path(directory) / "checkpoints.sqlite") as db:
+                self.assertEqual(db.execute("select count(*) from checkpoints").fetchone()[0], 0)
             logs = "".join(path.read_text() for path in Path(directory).glob("logs/*.log"))
             self.assertIn("RUN_RESUME | step=4", logs)
         configure_logging("ERROR")

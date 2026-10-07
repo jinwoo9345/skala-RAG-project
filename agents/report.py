@@ -130,7 +130,7 @@ def _unique_lines(lines, limit=None):
 def _gap_summary(gaps):
     grouped = {}
     for gap in gaps:
-        key = (gap["technology"], gap.get("perspective", "technical"))
+        key = (gap["technology"], gap.get("perspective", "technical"), gap.get("status") == "failed")
         grouped.setdefault(key, []).append(gap["item"])
     labels = {
         "technical": "기술 조사",
@@ -145,8 +145,9 @@ def _gap_summary(gaps):
         "공개 자료로 직접 근거를 확인하지 못한 항목은 아래와 같다. "
         "이는 부정적 판정이 아니라 현재 공개 자료로 확정할 수 있는 범위의 한계이다."
     ] + [
-        f"- {technology} · {labels.get(perspective, perspective)}: {', '.join(dict.fromkeys(items))}"
-        for (technology, perspective), items in grouped.items()
+        f"- {technology} · {labels.get(perspective, perspective)}{' (조사 실패)' if failed else ''}: "
+        f"{', '.join(dict.fromkeys(items))}"
+        for (technology, perspective, failed), items in grouped.items()
     ]
 
 

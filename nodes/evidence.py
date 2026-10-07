@@ -29,8 +29,11 @@ def first_evidence_check(state):
 
 
 def query_rewrite(state, services):
-    """부족 항목의 질의를 재작성하고 실제 재검색 질의를 State에 저장한다."""
-    count = state["retry_count"] + 1
+    """부족 항목의 질의를 재작성하고 실제 재검색 질의를 State에 저장한다.
+
+    retry_count는 Supervisor가 재검색을 지시할 때 이미 올려 두었으므로 여기서는 읽기만 한다.
+    """
+    count = state["retry_count"]
     targets = technical_query_targets(technology_names(state), state["missing_evidence"], count)
     if services.question_rewriter is None:
         raise ValueError("question_rewriter 서비스 필요")
@@ -41,7 +44,7 @@ def query_rewrite(state, services):
     if len(queries) != len(targets) or any(not query for query in queries):
         raise ValueError("Query Rewrite 결과가 부족 항목과 일치하지 않음")
     get_logger().info("QUERY_REWRITE | strategy=%d | queries=%d", count, len(queries))
-    return {"search_queries": queries, "retry_count": count}
+    return {"search_queries": queries}
 
 
 def second_evidence_check(state):
