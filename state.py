@@ -85,8 +85,9 @@ def initial_state(
 ) -> ResearchState:
     if not 0 <= max_retries <= 10:
         raise ValueError("max_retries는 0~10 사이여야 함")
-    if max_steps < 1:
-        raise ValueError("max_steps는 1 이상이어야 함")
+    # 기술 조사 1 + 마무리 4단계(verification·synthesis·report·quality_eval) + 종료 결정
+    if max_steps < 6:
+        raise ValueError("max_steps는 6 이상이어야 함")
     return {
         "technologies": [
             {

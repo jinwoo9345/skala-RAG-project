@@ -8,6 +8,7 @@ from schemas import (
     Extraction,
     QualityJudgement,
     ReportDraft,
+    RouteChoice,
     Synthesis,
 )
 from services import Services
@@ -78,6 +79,7 @@ class DemoLLM:
         self.scenario = scenario
         self.technical_calls = {}
         self.quality_calls = 0
+        self.route_calls = []
 
     def generate(self, task, instructions, payload, schema, *, judge=False):
         if schema is Extraction:
@@ -152,6 +154,12 @@ class DemoLLM:
                 else []
             )
             return Synthesis(summary=text, commonalities=text, differences=[], tradeoffs=[], conclusion=text)
+        if schema is RouteChoice:
+            # 근거 공백이 가장 큰 후보, 동률이면 마지막 후보: 고정 순서가 아님을 테스트에서 확인한다.
+            best = max(c["missing_criteria"] for c in payload["candidates"])
+            target = [c["perspective"] for c in payload["candidates"] if c["missing_criteria"] == best][-1]
+            self.route_calls.append(target)
+            return RouteChoice(target=target, reason="DEMO 라우팅")
         if schema is QualityJudgement:
             # quality_fail: 첫 평가만 중립성 미달로 판정해 재작업 Loop를 확인한다.
             self.quality_calls += 1

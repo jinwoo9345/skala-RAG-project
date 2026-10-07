@@ -93,11 +93,29 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(services.llm.quality_calls, 2)
         self.assertTrue(state["eval_result"]["passed"])
 
-    def test_step_limit_still_produces_report_and_ends(self):
-        state, _ = self.run_scenario(max_steps=3)
+    def test_perspectives_are_chosen_from_state_not_fixed_order(self):
+        _, services = self.run_scenario()
+        # demo 라우터는 근거 공백이 큰 관점(동률이면 마지막)을 고른다: 선언 순서(trl→market→…)와 다르다.
+        self.assertEqual(services.llm.route_calls, ["domain", "market", "stakeholder"])
+        self.assertNotEqual(tuple(services.llm.route_calls), PERSPECTIVES[:3])
+
+    def test_step_limit_stops_research_but_still_verifies_and_evaluates(self):
+        state, _ = self.run_scenario(max_steps=8)
+        self.assertEqual(state["step_count"], 8)
         self.assertEqual(state["directive"]["target"], "end")
         self.assertTrue(state["final_report"])
-        self.assertNotIn("quality_eval", state["node_status"])
+        # 남은 결정은 마무리에 쓰고, 품질 평가까지 실행한다.
+        for name in ("verification", "synthesis", "report", "quality_eval"):
+            self.assertEqual(state["node_status"][name], "done")
+        self.assertIsNotNone(state["eval_result"])
+        unrun = [p for p in PERSPECTIVES if p not in state["node_status"]]
+        self.assertEqual(len(unrun), 2)
+        cut = {x["perspective"] for x in state["missing_evidence"] if x["status"] == "step_limit"}
+        self.assertEqual(cut, set(unrun))
+
+    def test_max_steps_must_leave_room_for_finalization(self):
+        with self.assertRaises(ValueError):
+            initial_state(max_steps=5)
 
     def test_agent_failure_is_recorded_retried_once_and_run_continues(self):
         services = demo_services()
@@ -157,6 +175,42 @@ class WorkflowTests(unittest.TestCase):
             ):
                 self.assertIn(event, logs)
         configure_logging("ERROR")
+
+    def test_cli_resumes_interrupted_run_from_checkpoint(self):
+        import graph as graph_module
+
+        original, calls = graph_module.supervisor_node, []
+
+        def crash_on_fifth(state, services):
+            calls.append(state["step_count"])
+            if len(calls) == 5:
+                raise RuntimeError("process killed")
+            return original(state, services)
+
+        with tempfile.TemporaryDirectory() as directory, patch("sys.stdout", new_callable=io.StringIO):
+            env_file = Path(directory) / "test.env"
+            env_file.write_text("LANGSMITH_TRACING=false\n", encoding="utf-8")
+            common = ["--demo", "--env-file", str(env_file), "--output-dir", directory]
+            with patch.object(graph_module, "supervisor_node", crash_on_fifth):
+                self.assertEqual(main(common), 1)
+            self.assertEqual(list(Path(directory).glob("*/report.pdf")), [])
+            run_id = next(Path(directory).glob("logs/*.log")).stem.rsplit("-", 1)[-1]
+            self.assertEqual(main([*common, "--resume", run_id]), 0)
+            self.assertEqual(len(list(Path(directory).glob(f"*-{run_id}/report.pdf"))), 1)
+            logs = "".join(path.read_text() for path in Path(directory).glob("logs/*.log"))
+            self.assertIn("RUN_RESUME | step=4", logs)
+        configure_logging("ERROR")
+
+    def test_quality_failure_saves_only_draft(self):
+        from app import save_outputs
+        from config import Settings
+
+        state, _ = self.run_scenario()
+        state["eval_result"] = {"passed": False, "items": {"neutrality": {"passed": False, "reason": "test"}}}
+        with tempfile.TemporaryDirectory() as directory:
+            pdf = save_outputs(state, Settings(), "test", Path(directory), "demo")
+            self.assertEqual(pdf.name, "draft_report.pdf")
+            self.assertEqual(list(Path(directory).glob("*/report.pdf")), [])
 
     def test_no_credentials_does_not_silently_use_demo(self):
         with (

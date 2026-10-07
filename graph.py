@@ -55,7 +55,7 @@ def build_graph(run_id="standalone", services=None, checkpointer=None):
 
         return invoke
 
-    builder.add_node("supervisor", log_node("supervisor", supervisor_node, logger))
+    builder.add_node("supervisor", log_node("supervisor", lambda state: supervisor_node(state, services), logger))
     for name, function in AGENT_FUNCTIONS.items():
         builder.add_node(name, log_node(name, bind(name, function), logger))
         builder.add_edge(name, "supervisor")

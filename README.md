@@ -8,7 +8,7 @@
 
 - **Objective** : ITME와 CXL-PIM을 복수 관점에서 비교하고, 주장별 근거와 출처를 포함한 PDF 보고서를 생성한다.
 - **Pattern : Supervisor** — **선정 이유** : 관점별 근거 확보 상태가 서로 다르므로, 중앙 Supervisor가 State를 읽고 필요한 Agent만 선택하거나 부족한 항목만 재조사하는 구조가 적합하다.
-- **동적 처리** : 고정된 노드 순서나 정해진 스텝 수를 사용하지 않는다. Supervisor가 현재 State의 수집된 관점, 근거 충분도, Agent 실패 여부, 품질 평가 결과를 매 단계 확인하여 `add_conditional_edges`의 다음 대상을 결정한다. 근거가 부족하면 해당 기술 또는 관점 Agent만 재호출하고, 품질 평가에 실패하면 보고서나 비어 있는 관점을 허용 횟수 안에서 다시 처리한다.
+- **동적 처리** : 고정된 노드 순서나 정해진 스텝 수를 사용하지 않는다. Supervisor가 현재 State의 수집된 관점, 근거 충분도, Agent 실패 여부, 품질 평가 결과를 매 단계 확인하여 `add_conditional_edges`의 다음 대상을 결정한다. 수집하거나 재조사할 관점이 여럿이면 각 관점의 근거 공백과 이미 수집된 결과를 요약해 LLM이 다음 관점을 고른다(후보 밖 선택은 무시). 근거가 부족하면 해당 기술 또는 관점 Agent만 재호출하고, 품질 평가에 실패하면 보고서나 비어 있는 관점을 허용 횟수 안에서 다시 처리한다.
 
 ## Selected Technologies
 
@@ -23,7 +23,7 @@
 - TRL, 시장성, 이해관계자, 데이터센터 적용성을 독립 Agent가 평가하며, 웹 자료는 출처 등급과 기술 관련 범위에 따라 선별한다.
 - 부족한 기술 근거는 Query Rewrite 후 최대 2회 재검색하고, 부족한 관점 기준은 해당 Agent가 1회 재조사한다.
 - **확증 편향 방지 전략** : 기술·평가 기준별 검색을 분리하고 Fact·Opinion·Inference를 구분한다. 주요 주장에 대한 반대 근거를 별도로 검색하고, 상충하는 결과와 실험 조건 차이는 Conflict로 기록한다. 조건이 다른 수치를 직접 우열 비교하지 않는다.
-- **보고서 품질 평가** : 규칙 검사와 LLM Judge를 함께 사용하여 Groundedness, 중립성, 편향 통제, 관점 커버리지를 평가한다. 두 검사를 모두 통과해야 하며, 미달 시 Supervisor가 최대 1회 재작업을 지시한다.
+- **보고서 품질 평가** : 규칙 검사와 LLM Judge를 함께 사용하여 Groundedness, 중립성, 편향 통제, 관점 커버리지를 평가한다. 두 검사를 모두 통과해야 하며, 미달 시 Supervisor가 최대 1회 재작업을 지시한다. 끝내 미달이면 `report.pdf` 대신 `draft_report.pdf`만 저장하고 종료 코드 2로 끝난다.
 
 ## Tech Stack
 
@@ -56,11 +56,11 @@
 
 - **제어 vs 페이로드 분리** : 페이로드에는 기술·관점별 근거, 반대 근거, Conflict, 종합 결과, 보고서, 참고문헌과 품질 평가를 저장한다. 제어 영역에는 `trace_id`, `step_count`, `directive`, `node_status`, 재시도·재작업 횟수와 부족 근거를 저장한다.
 - **관측성 위치** : 라우팅 결정 이력은 State에 누적하지 않고 `SUPERVISOR_DECISION` 로그와 LangSmith trace에 남긴다. State에는 현재 `directive`만 유지한다.
-- **지속성 비용** : PDF 원문 청크와 웹 본문 전체는 State에 저장하지 않고 검증된 인용 단위 근거만 유지한다. 실행 결과는 `report.pdf`, `state.json`, `run.json`으로 저장한다.
-- **상관** : 동일한 `trace_id`를 State, 로그, LangSmith metadata, 출력 디렉터리 이름에 사용한다.
-- **재개/복구** : 실행 중 Agent 예외를 `failed` 상태와 `last_error`로 기록하고 Supervisor가 제한된 횟수만 재시도한다. 영속 checkpoint 기반의 프로세스 재개는 현재 연결되어 있지 않다.
+- **지속성 비용** : PDF 원문 청크와 웹 본문 전체는 State에 저장하지 않고 검증된 인용 단위 근거만 유지한다. 실행 결과는 `report.pdf`(품질 미달 시 `draft_report.pdf`), `state.json`, `run.json`으로 저장한다.
+- **상관** : 동일한 `trace_id`를 State, 로그, LangSmith metadata, checkpoint thread_id, 출력 디렉터리 이름에 사용한다.
+- **재개/복구** : 실행 중 Agent 예외를 `failed` 상태와 `last_error`로 기록하고 Supervisor가 제한된 횟수만 재시도한다. 매 superstep 뒤 State를 SQLite checkpoint(`outputs/checkpoints.sqlite`)에 저장하므로, 프로세스가 중단되면 `--resume {trace_id}`로 마지막 단계부터 이어서 실행한다.
 - **동시 처리** : Supervisor가 한 번에 하나의 Agent만 실행하므로 동시 State 쓰기가 없으며 Reducer를 사용하지 않는다.
-- **종료 보장** : Supervisor 결정은 최대 30회, 기술 재검색은 최대 2회, Agent별 재작업과 품질 재작업은 최대 1회로 제한한다. LangGraph의 `recursion_limit`도 이 상한에서 계산한다.
+- **종료 보장** : Supervisor 결정은 최대 30회, 기술 재검색은 최대 2회, Agent별 재작업과 품질 재작업은 최대 1회로 제한한다. LangGraph의 `recursion_limit`도 이 상한에서 계산한다. 남은 결정 수가 마무리 단계(검증→종합→보고서→품질 평가→종료)에 필요한 만큼뿐이면 조사를 멈추고 마무리를 진행하므로, 상한에 닿아도 검증과 품질 평가를 건너뛰지 않는다. 끝내지 못한 조사는 `step_limit`으로 기록되어 보고서 한계에 표시된다.
 
 ## Architecture
 
@@ -114,6 +114,7 @@ flowchart TD
 uv sync --frozen --extra rag --extra dev
 cp .env.example .env  # OPENAI_API_KEY, TAVILY_API_KEY 설정
 uv run python app.py --run
+uv run python app.py --run --resume {trace_id}  # 중단된 실행 이어서 실행
 ```
 
 생성된 보고서와 실행 State는 `outputs/{실행시각}-{trace_id}/`에 저장된다.

@@ -49,7 +49,10 @@ def save_outputs(result, settings, run_id, output_dir, mode):
 
     directory = output_dir / (datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M%S") + "-" + run_id)
     directory.mkdir(parents=True, exist_ok=False)
-    render_pdf(result["final_report"], directory / "report.pdf")
+    # 품질 평가를 통과한 보고서만 report.pdf로 저장한다. 미달이면 초안으로만 남긴다.
+    passed = bool((result["eval_result"] or {}).get("passed"))
+    pdf = directory / ("report.pdf" if passed else "draft_report.pdf")
+    render_pdf(result["final_report"], pdf)
     (directory / "state.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     (directory / "run.json").write_text(
         json.dumps(
@@ -65,7 +68,7 @@ def save_outputs(result, settings, run_id, output_dir, mode):
         ),
         encoding="utf-8",
     )
-    return directory
+    return pdf
 
 
 def main(argv=None):
@@ -82,6 +85,7 @@ def main(argv=None):
         choices=["normal", "retry_success", "retry_exhausted", "second_missing", "counter_found", "quality_fail"],
         default="normal",
     )
+    parser.add_argument("--resume", metavar="RUN_ID", help="중단된 실행을 체크포인트에서 이어서 실행 (--run/--demo와 함께)")
     parser.add_argument("--rebuild-index", action="store_true")
     parser.add_argument("--max-retries", type=int, default=MAX_RETRIES)
     parser.add_argument("--env-file", type=Path, help="명시한 dotenv 파일 사용; dotenv 값 우선")
@@ -89,7 +93,9 @@ def main(argv=None):
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
     parser.add_argument("--log-file", type=Path)
     args = parser.parse_args(argv)
-    run_id = uuid4().hex[:8]
+    if args.resume and not (args.run or args.demo):
+        parser.error("--resume은 --run 또는 --demo와 함께 사용")
+    run_id = args.resume or uuid4().hex[:8]
     log_file = args.log_file
     if log_file is None and (args.run or args.demo or args.index):
         log_file = args.output_dir / "logs" / f"{datetime.now(UTC).astimezone():%Y%m%d-%H%M%S}-{run_id}.log"
@@ -133,22 +139,31 @@ def main(argv=None):
                 from services import live_services
 
                 services = live_services(settings)
-            graph = build_graph(run_id, services)
-            result = graph.invoke(
-                state,
-                config={
-                    # supervisor ⇄ 에이전트 왕복마다 2 superstep. max_steps 가드가 먼저 종료시킨다.
-                    "recursion_limit": 2 * state["max_steps"] + 10,
-                    # LangSmith 트레이스와 State·로그를 같은 trace_id로 연결한다.
-                    "run_name": "kv-cache-supervisor",
-                    "metadata": {"trace_id": run_id},
-                    "tags": ["supervisor", services.mode],
-                },
-            )
+            from langgraph.checkpoint.sqlite import SqliteSaver
+
+            config = {
+                # supervisor ⇄ 에이전트 왕복마다 2 superstep. max_steps 가드가 먼저 종료시킨다.
+                "recursion_limit": 2 * state["max_steps"] + 10,
+                # 체크포인트 thread와 LangSmith 트레이스, State·로그를 같은 trace_id(run_id)로 연결한다.
+                "configurable": {"thread_id": run_id},
+                "run_name": "kv-cache-supervisor",
+                "metadata": {"trace_id": run_id},
+                "tags": ["supervisor", services.mode],
+            }
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            # 매 superstep 뒤 State를 저장해 프로세스가 중단돼도 --resume RUN_ID로 이어서 실행한다.
+            with SqliteSaver.from_conn_string(str(args.output_dir / "checkpoints.sqlite")) as checkpointer:
+                graph = build_graph(run_id, services, checkpointer)
+                if args.resume:
+                    snapshot = graph.get_state(config)
+                    if not snapshot.values:
+                        raise ValueError("재개할 체크포인트 없음")
+                    logger.info("RUN_RESUME | step=%d | next=%s", snapshot.values["step_count"], snapshot.next)
+                result = graph.invoke(None if args.resume else state, config=config)
             if not result["final_report"]:
                 raise RuntimeError("보고서 생성 실패: " + str(result["last_error"]))
-            directory = save_outputs(result, settings, run_id, args.output_dir, services.mode)
-            logger.info("REPORT_SAVED | directory=%s", directory)
+            pdf = save_outputs(result, settings, run_id, args.output_dir, services.mode)
+            logger.info("REPORT_SAVED | file=%s", pdf)
             logger.info(
                 "RUN_DONE | elapsed=%.3fs | chars=%d | missing=%d | steps=%d | reworks=%s | quality=%s",
                 perf_counter() - started,
@@ -158,7 +173,12 @@ def main(argv=None):
                 result["rework_counts"],
                 (result["eval_result"] or {}).get("passed"),
             )
-            print(directory / "report.pdf")
+            print(pdf)
+            if pdf.name != "report.pdf":
+                items = (result["eval_result"] or {}).get("items", {})
+                failed = [name for name, item in items.items() if not item["passed"]] or ["미평가"]
+                logger.warning("QUALITY_FAILED | 품질 기준 미달로 초안만 저장 | failed=%s", ", ".join(failed))
+                return 2
         if not any((args.show_state, args.show_graph, args.run, args.demo, args.index, args.check)):
             parser.print_help()
         return 0

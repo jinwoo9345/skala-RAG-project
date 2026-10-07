@@ -93,3 +93,8 @@ class QualityItem(StrictModel):
 
 class QualityJudgement(StrictModel):
     items: list[QualityItem]
+
+
+class RouteChoice(StrictModel):
+    target: Literal["trl", "market", "stakeholder", "domain"]
+    reason: str
